@@ -51,7 +51,7 @@ jobs:
             sdk-index-url: 'https://up.momentum-fw.dev/firmware/'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned to the commit sha of v0.1.4 (v0.1 and v0.1.4 currently point at the same commit).
       # A sha rather than a floating tag: tags can be repointed, and build reproducibility should
@@ -81,7 +81,7 @@ jobs:
       # if-no-files-found: error is a deliberate guard against a no-op run:
       # without it, a run where the build step exits 0 but produces no .fap would still show green.
       - name: Upload FAP
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sigroam-${{ steps.build.outputs.suffix }}
           path: ${{ steps.build.outputs.fap-artifacts }}

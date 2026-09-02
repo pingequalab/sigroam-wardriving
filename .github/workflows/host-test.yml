@@ -33,7 +33,7 @@ jobs:
         cc: [gcc, clang]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compiler version
         run: ${{ matrix.cc }} --version

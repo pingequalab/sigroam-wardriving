@@ -47,7 +47,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Resolve tag and compare with application.fam
         id: resolve
@@ -90,7 +90,7 @@ jobs:
             sdk-index-url: 'https://up.momentum-fw.dev/firmware/'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.check.outputs.tag }}
 
@@ -132,7 +132,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload staged FAP
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.name }}
           path: staged/*.fap
@@ -145,12 +145,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.check.outputs.tag }}
 
       - name: Download built FAPs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-*
           merge-multiple: true
