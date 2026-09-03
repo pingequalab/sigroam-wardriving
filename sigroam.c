@@ -7,8 +7,100 @@
 #include "sigroam.h"
 
 #include "src/sr_parse_marauder.h"
+#include "src/sr_resync.h"
 
 #include <string.h>
+
+/* File-static: sigroam.h is not on the D11-RESYNC whitelist. GUI-thread only. */
+static SrResyncCtx s_resync;
+
+static bool sigroam_resync_queue(SigRoamApp* app, bool is_start) {
+    const SrSourceCodec* codec;
+    char cmd[SR_WORKER_CMD_MAX];
+    size_t n;
+
+    if(app->io == NULL || !sr_io_is_open(app->io) || app->worker == NULL) {
+        return false;
+    }
+    codec = sigroam_codec(app);
+    if(codec == NULL) {
+        return false;
+    }
+
+    if(is_start) {
+        SrScanCfg cfg = {.mirror_to_serial = false};
+        n = codec->build_start_cmd(&cfg, cmd, sizeof(cmd));
+    } else {
+        n = codec->build_stop_cmd(cmd, sizeof(cmd));
+    }
+
+    app->scan.session_rev_at_send = app->model.session_rev;
+    app->scan.cmd_tick_ms = furi_get_tick();
+    app->scan.cmd_is_start = is_start;
+    app->scan_cmdack_at_send =
+        sr_worker_cmdack_count(app->worker, is_start ? SrCmdAckStart : SrCmdAckStop);
+    if(n > 0 && sr_worker_send_cmd(app->worker, cmd)) {
+        app->scan.cmd_pending = true;
+        app->scan.cmd_rejected = false;
+        return true;
+    }
+    app->scan.cmd_pending = false;
+    app->scan.cmd_rejected = true;
+    return false;
+}
+
+static void sigroam_resync_tick(SigRoamApp* app) {
+    SrResyncIn in;
+    SrResyncAct act;
+    SrIoStats st;
+
+    memset(&st, 0, sizeof(st));
+    if(app->io != NULL) {
+        sr_io_get_stats(app->io, &st);
+    }
+    memset(&in, 0, sizeof(in));
+    in.vbus_present = sr_worker_vbus_present(app->worker);
+    in.session = app->model.session;
+    in.session_rev = app->model.session_rev;
+    in.rx_bytes = st.rx_bytes;
+    in.now_ms = furi_get_tick();
+
+    act = sr_resync_eval(&s_resync, &in);
+    if(act == SrResyncActSendStop) {
+        if(sigroam_resync_queue(app, false)) {
+            sr_resync_note_sent(&s_resync, in.now_ms, false, app->model.session_rev);
+            FURI_LOG_I(SR_TAG, "resync: stop");
+        }
+    } else if(act == SrResyncActSendStart) {
+        if(sigroam_resync_queue(app, true)) {
+            sr_resync_note_sent(&s_resync, in.now_ms, true, app->model.session_rev);
+            FURI_LOG_I(SR_TAG, "resync: start");
+        }
+    }
+}
+
+static void sigroam_resync_paint_hint(SigRoamApp* app) {
+    uint8_t hint;
+    View* v;
+
+    hint = sr_resync_hint_stage(&s_resync);
+    if(hint == (uint8_t)SR_RESYNC_HINT_NONE || app->dash == NULL) {
+        return;
+    }
+    v = sr_view_dash_get_view(app->dash);
+    if(v == NULL) {
+        return;
+    }
+    with_view_model(
+        v,
+        SrDashModel* m,
+        {
+            if(m != NULL) {
+                m->wait_stage = hint;
+            }
+        },
+        true);
+}
 
 /* Log Device lives in an RTC backup register, not on disk (V-043).
  * Default USART = Pin 13/14, the same pair Scout Lite uses. */
@@ -75,8 +167,11 @@ const SrSourceCodec* sigroam_codec(const SigRoamApp* app) {
  */
 const char* sigroam_io_status_hint(SrIoStatus st) {
     switch(st) {
-    case SrIoErrNoOtg:
-        return "5V OTG is off";
+    case SrIoErrNo5v:
+        /* Single line: a two-line hint pushes the Dash tab's fourth row off screen (D1).
+         * Says "pin 1", not "OTG": with USB connected the boost is off by design and pin 1 is
+         * still live, so naming OTG here would point at the wrong thing (V-072). */
+        return "No 5V on pin 1";
     case SrIoErrLogDevice:
         return "Log Dev uses 13/14"; /* Single line: a two-line hint pushes the Dash tab's fourth row off screen (D1) */
     case SrIoErrPortBusy:
@@ -126,6 +221,7 @@ static void sigroam_tick_event_callback(void* context) {
         return;
     }
     app->tick_n++;
+    sigroam_resync_tick(app);
     memset(&st, 0, sizeof(st));
     memset(&ws, 0, sizeof(ws));
     if((app->tick_n % 10u) == 0u && app->io) {
@@ -140,6 +236,9 @@ static void sigroam_tick_event_callback(void* context) {
         sigroam_dash_refresh(app);
     }
     scene_manager_handle_tick_event(app->scene_manager);
+    if(scene_manager_get_current_scene(app->scene_manager) == SigRoamSceneDash) {
+        sigroam_resync_paint_hint(app);
+    }
     furi_mutex_release(app->mtx);
 
     if(log_io) {
@@ -175,6 +274,18 @@ static SigRoamApp* sigroam_app_alloc(void) {
      * Do not move this into scene_dash_on_enter: the Dash page is entered and left repeatedly, and
      * resetting each time would lose in-flight command state. */
     app->scan.timeout_ms = SR_SCAN_CTL_TIMEOUT_MS;
+    sr_resync_init(&s_resync);
+    /* Print the values that actually compiled in. Deliberately NOT wrapped in
+     * #ifdef SR_RESYNC_DIAG: a line that only appears in one of the two builds cannot
+     * tell "diag build" apart from "log line missing". Both builds print, so the numbers
+     * themselves are the evidence. */
+    FURI_LOG_I(
+        SR_TAG,
+        "resync cfg: tries=%d gap=%d giveup=%d quiet=%d",
+        (int)SR_RESYNC_MAX_TRIES,
+        (int)SR_RESYNC_RETRY_GAP_MS,
+        (int)SR_RESYNC_GIVEUP_MS,
+        (int)SR_RESYNC_RX_QUIET_MS);
 
     app->mtx = furi_mutex_alloc(FuriMutexTypeNormal);
     furi_check(app->mtx);

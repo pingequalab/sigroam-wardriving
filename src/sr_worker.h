@@ -52,3 +52,7 @@ void sr_worker_get_stats(const SrWorker* w, SrWorkerStats* out);
  *
  * w == NULL, w->parser == NULL, or cls out of range -> returns 0. Callable from any thread (read only). */
 uint32_t sr_worker_cmdack_count(const SrWorker* w, SrCmdAckClass cls);
+
+/* Last VBUS-present sample taken on the worker thread (threshold 4.5 V, must
+ * match sr_io.c SR_IO_VBUS_PRESENT_V). Readable from any thread. w == NULL → false. */
+bool sr_worker_vbus_present(const SrWorker* w);

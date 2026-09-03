@@ -8,7 +8,7 @@ typedef enum {
     SrIoOk = 0,
     SrIoErrState, /* A NULL argument, or open called while already open */
     SrIoErrLogDevice, /* Log Device = Usart, which conflicts with pins 13/14 (V-043) */
-    SrIoErrNoOtg, /* OTG was requested but 5V never physically appeared */
+    SrIoErrNo5v, /* Neither 5V source reached pin 1: no USB VBUS and the OTG boost never came up (V-072) */
     SrIoErrPortBusy, /* control_acquire returned NULL */
     SrIoErrBadBaud, /* The HAL does not support that baud rate */
     SrIoErrAlloc, /* Allocation failed */

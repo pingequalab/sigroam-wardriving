@@ -1,6 +1,7 @@
 #include "sr_view_dash.h"
 
 #include "../sigroam.h"
+#include "../src/sr_resync.h"
 
 #include <gui/elements.h>
 #include <stdio.h>
@@ -209,6 +210,79 @@ static void sr_view_dash_draw_dash(Canvas* canvas, const SrDashModel* m) {
         }
 
         /* The next two rows are drawn only when Debug rows = On in Settings (for T5.1 long-run evidence). */
+        if(y > 61) {
+            return;
+        }
+        sr_fmt__udec(m->rx_dropped, a, sizeof(a));
+        sr_fmt__udec(m->rx_max_fill, b, sizeof(b));
+        n = snprintf(raw, sizeof(raw), "d=%s f=%s", a, b);
+        sr_view_dash_put_line(canvas, y, raw, n, sizeof(raw));
+        y += 10;
+
+        if(y > 61) {
+            return;
+        }
+        sr_fmt__udec(m->heap_free / 1024u, a, sizeof(a));
+        sr_fmt__udec(m->heap_min / 1024u, b, sizeof(b));
+        sr_fmt__udec(m->heap_max_blk / 1024u, c, sizeof(c));
+        n = snprintf(raw, sizeof(raw), "h=%sK m=%sK b=%sK", a, b, c);
+        sr_view_dash_put_line(canvas, y, raw, n, sizeof(raw));
+        return;
+    }
+
+    if(m->wait_stage == (uint8_t)SR_RESYNC_HINT_BUSY ||
+       m->wait_stage == (uint8_t)SR_RESYNC_HINT_LOST) {
+        /* Packed into wait_stage so SrDashModel does not grow (sizeof == 644).
+         * Single line: a two-line hint pushes the Dash tab's fourth row off screen (D1). */
+        if(y > 61) {
+            return;
+        }
+        if(m->wait_stage == (uint8_t)SR_RESYNC_HINT_BUSY) {
+            n = snprintf(raw, sizeof(raw), "Resyncing...");
+        } else {
+            n = snprintf(raw, sizeof(raw), "Scan lost, press OK");
+        }
+        sr_view_dash_put_line(canvas, y, raw, n, sizeof(raw));
+        y += 10;
+
+        if(y > 61) {
+            return;
+        }
+        sr_fmt_bytes(m->rx_bytes, a, sizeof(a));
+        n = snprintf(raw, sizeof(raw), "rx=%s", a);
+        sr_view_dash_put_line(canvas, y, raw, n, sizeof(raw));
+        y += 10;
+
+        /*
+         * Resync diagnostics row. **Not** gated on debug_rows: the 5.4 unplug SOP needs it and
+         * Settings is not reachable mid-run. All three fields already exist in SrDashModel, so
+         * sizeof stays 644 (test_gps_sample.c:723).
+         *
+         * Why exactly these three. sr_resync.h reaches SrResyncLost through exactly two exits:
+         * giveup at trigger_ms+30000, or AwaitStop timing out with tries >= 3 at t1+12000.
+         * Session state alone separates them:
+         *   Running -> the first stopscan was never confirmed (all three tries failed);
+         *              Lost is the tries>=3 exit and the AwaitStart path never ran.
+         *   Stopped -> step 1 succeeded and we were parked in AwaitStart, so a Lost earlier
+         *              than 30 s would mean a real hole in that path.
+         * i (illegal_trans) then splits "the peer never answered" from "the peer answered but
+         * sr_model refused the transition" (src/sr_model.c:135-170: apply_started while already
+         * Running, and apply_stopped while not Running, both only bump illegal_trans).
+         * r (session_rev) is the absolute counter -- record it once before unplugging.
+         */
+        if(y > 61) {
+            return;
+        }
+        sr_fmt__udec(m->session_rev, a, sizeof(a));
+        sr_fmt__udec(m->illegal_trans, b, sizeof(b));
+        n = snprintf(raw, sizeof(raw), "%s r=%s i=%s", sr_fmt_session_label(m->session), a, b);
+        sr_view_dash_put_line(canvas, y, raw, n, sizeof(raw));
+        y += 10;
+
+        if(!m->debug_rows) {
+            return;
+        }
+
         if(y > 61) {
             return;
         }

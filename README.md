@@ -98,10 +98,16 @@ Two things will stop the app from working if you skip them:
 - **`Settings → System → Log Device` must be `Off`.** Pins 13/14 are shared with
   the firmware's serial log. If the log owns them, the app cannot open the port —
   it detects this and says so on screen rather than failing silently.
-- **5 V on pin 1 comes from the OTG boost converter, not a permanent rail.** The
-  app requests OTG and verifies the physical state before opening the port. Note
-  that while USB is plugged in, the firmware defers OTG — so the scanner may have
-  no power until you unplug USB and restart the app.
+- **5 V on pin 1 has two independent sources, and the app handles both.** With USB
+  plugged in, the pin is fed straight from USB VBUS and the firmware deliberately
+  keeps the boost converter off; on battery, the same pin is fed by the OTG boost,
+  which the app requests and then confirms before opening the port. Either way the
+  scanner is powered, so you can run the app on USB power or on battery.
+- **Unplugging USB mid-session restarts the scanner.** Power handover to the
+  battery itself is seamless, but the board browns out and comes back in its
+  non-scanning state. The app notices the silence, shows `Resyncing...` and
+  re-issues the scan command until the board answers again — measured at 67 to
+  77 seconds on the reference board, with the retries capped at 2 minutes.
 
 **Do not power the scanner from pin 9 (3.3 V).** It is limited to 150 mA and a
 5 GHz-capable ESP32 will exceed that on transmit peaks.
@@ -183,9 +189,17 @@ scanner prints.
 On the scanner's own microSD card, written by Marauder as CSV. SigRoam persists
 only your settings on the Flipper. The CSV is what you upload to WiGLE.
 
-**Why does the scanner have no power when USB is plugged in?**
-5 V on pin 1 comes from the OTG boost converter. While USB is connected, the
-Flipper firmware defers OTG, so pin 1 stays off. Unplug USB and restart the app.
+**Can I use it with USB plugged in?**
+Yes. Pin 1 is fed from USB VBUS whenever USB is connected, and from the OTG boost
+converter when it is not. The app checks both before it opens the serial port, so
+running on a car charger and running on battery are equally supported.
+
+**The scan went quiet right after I unplugged USB. What happened?**
+The Flipper switches to battery cleanly, but the scanner board browns out during
+the handover and restarts into its non-scanning state. The app detects that the
+data stream has stopped and re-issues the scan command until the board answers;
+the counters resume on their own. On the reference board this takes 67 to 77
+seconds, which is how long the scanner needs to boot and accept commands again.
 
 **Why does the app say the serial port is busy?**
 Pins 13/14 are shared with the firmware's serial log. Set

@@ -17,6 +17,10 @@
 #define SR_IO_OTG_SAMPLES 6u
 #define SR_IO_OTG_SAMPLE_MS 20u
 #define SR_IO_OTG_SETTLE_MS 200u
+/* Must stay equal to the upstream threshold in
+ * applications/services/power/power_service/power.c ("voltage_vbus < 4.5f", read 2026-09-02).
+ * Above it the charger refuses to boost and pin 1 is fed from USB VBUS instead (V-072). */
+#define SR_IO_VBUS_PRESENT_V 4.5f
 
 _Static_assert(
     (uint32_t)FuriHalSerialRxEventData == SR_RX_BIT_DATA,
@@ -57,8 +61,8 @@ const char* sr_io_status_str(SrIoStatus st) {
         return "bad state";
     case SrIoErrLogDevice:
         return "log device";
-    case SrIoErrNoOtg:
-        return "no otg";
+    case SrIoErrNo5v:
+        return "no 5v";
     case SrIoErrPortBusy:
         return "port busy";
     case SrIoErrBadBaud:
@@ -167,6 +171,9 @@ void sr_io_free(SrIo* io) {
 SrIoStatus sr_io_open(SrIo* io, uint32_t baud) {
     bool requested;
     bool physical;
+    bool usb_5v;
+    float vbus;
+    uint32_t vbus_cv; /* VBUS in centivolts, rounded -- see the note at the log line */
     uint32_t sample;
 
     /* 1 */ if(io == NULL) {
@@ -179,7 +186,30 @@ SrIoStatus sr_io_open(SrIo* io, uint32_t baud) {
         return SrIoErrLogDevice;
     }
 
-    /* 4 OTG gate: the requested state and the physical state must not be conflated. */
+    /*
+     * 4 Power gate. Pin 1's 5V has **two independent sources** and they must not be conflated
+     * with each other, nor with the OTG *request* flag (V-072):
+     *
+     *   a) USB VBUS pass-through -- live whenever VBUS >= 4.5 V. In this case the power service
+     *      deliberately refuses to start the boost, so furi_hal_power_is_otg_enabled() is false
+     *      **by design** and says nothing about whether pin 1 is powered. Upstream
+     *      applications/services/power/power_service/power.c verbatim:
+     *          // Only try to enable if VBUS voltage is low, otherwise charger will refuse
+     *          if(power->info.voltage_vbus < 4.5f) { ...enable... }
+     *          else { FURI_LOG_W(TAG, "Postponing OTG enable: VBUS(%0.1f) >= 4.5v", ...); }
+     *   b) the battery boost -- only reachable while VBUS < 4.5 V.
+     *
+     * Gating solely on (b), as this function used to, refused to open the port whenever the
+     * Flipper was on USB even though the board was powered the whole time. That is what made
+     * "CLI and data stream are mutually exclusive" (V-053) look like a hardware law; it was ours.
+     *
+     * ** The OTG request is deliberately left standing in the USB case.** It is postponed rather
+     * than rejected, and the power service's own tick enables the boost as soon as VBUS drops
+     * (power.c, comment verbatim: "Change OTG state if needed (i.e. after disconnecting USB
+     * power)"). Withdrawing it here -- which the old rollback path did -- is exactly why
+     * unplugging USB used to require leaving and re-entering the app (V-053 note 8). Keeping it
+     * standing gives a seamless car-charger -> battery handover.
+     */
     io->power = furi_record_open(RECORD_POWER);
     requested = power_is_otg_enabled(io->power);
     io->otg_by_us = false;
@@ -188,33 +218,47 @@ SrIoStatus sr_io_open(SrIo* io, uint32_t baud) {
         io->otg_by_us = true;
     }
 
-    physical = false;
-    for(sample = 0; sample < SR_IO_OTG_SAMPLES; sample++) {
-        if(sample > 0u) {
+    vbus = furi_hal_power_get_usb_voltage();
+    usb_5v = (vbus >= SR_IO_VBUS_PRESENT_V);
+
+    /* One immediate read for the log in either case; only wait for the boost to rise when it is
+     * the source we actually depend on. Polling under USB would burn SAMPLES*SAMPLE_MS waiting
+     * for a state the charger has already refused to enter. */
+    physical = furi_hal_power_is_otg_enabled();
+    sample = 0;
+    if(!usb_5v) {
+        for(; !physical && sample < SR_IO_OTG_SAMPLES - 1u; sample++) {
             furi_delay_ms(SR_IO_OTG_SAMPLE_MS);
-        }
-        if(furi_hal_power_is_otg_enabled()) {
-            physical = true;
-            break;
+            physical = furi_hal_power_is_otg_enabled();
         }
     }
 
+    /* Round into centivolts before splitting. Truncating the fraction separately gets it wrong
+     * whenever the float sits just below the decimal value -- measured: 5.04 printed as "5.03",
+     * 5.2 as "5.19", and a negative reading as "0.-50". This line's whole purpose is to record
+     * VBUS as evidence, so an off-by-0.01 defeats it. The ADC cannot report negative; the clamp
+     * exists so a bad reading degrades to 0.00 rather than to garbage. */
+    vbus_cv = (vbus >= 0.0f) ? (uint32_t)(vbus * 100.0f + 0.5f) : 0u;
+
     FURI_LOG_I(
         SR_IO_TAG,
-        "otg: requested=%d physical=%d otg_by_us=%d sample=%lu",
+        "pwr: vbus=%lu.%02lu usb_5v=%d requested=%d physical=%d otg_by_us=%d sample=%lu",
+        (unsigned long)(vbus_cv / 100u),
+        (unsigned long)(vbus_cv % 100u),
+        usb_5v ? 1 : 0,
         requested ? 1 : 0,
         physical ? 1 : 0,
         io->otg_by_us ? 1 : 0,
         (unsigned long)(physical ? (sample + 1u) : 0u));
 
-    if(!physical) {
+    if(!usb_5v && !physical) {
         if(io->otg_by_us) {
             power_enable_otg(io->power, false);
         }
         io->otg_by_us = false;
         furi_record_close(RECORD_POWER);
         io->power = NULL;
-        return SrIoErrNoOtg;
+        return SrIoErrNo5v;
     }
     furi_delay_ms(SR_IO_OTG_SETTLE_MS);
 

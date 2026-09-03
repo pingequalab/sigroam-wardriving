@@ -31,7 +31,7 @@ App(
     # NOTE: this is a channel entirely separate from fap_icon: fap_icon is the 10x10 application
     #    icon the Catalog requires, whereas this is in-app artwork with no size constraint.
     fap_icon_assets="assets",
-    fap_version="0.1",
+    fap_version="0.2",
     fap_description="Wi-Fi survey companion for external ESP32 scanners",
     fap_author="PINGEQUA_Lab",
     sources=["*.c*", "!tools", "!backups", "!docs"],

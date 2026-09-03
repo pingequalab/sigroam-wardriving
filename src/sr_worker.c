@@ -3,12 +3,23 @@
 #include "sr_line.h"
 #include "sr_parse_marauder.h"
 
+#include <furi_hal.h>
 #include <string.h>
 
 #define SR_WORKER_TAG           "SrWorker"
 #define SR_WORKER_STACK_SIZE    2048u
 #define SR_WORKER_CHUNK         64u
 #define SR_WORKER_RX_TIMEOUT_MS 50u
+/*
+ * Product/engineering choice, not a measured I2C duration.
+ * Power service polls VBUS at 1 Hz; an unplug edge is persistent, so 250 ms is
+ * 4× that. RX headroom is 2048 B ≈ 178 ms @115200 (sr_io.c SR_IO_RX_CAP) —
+ * sampling must stay rare relative to that. On-device rx_dropped / rx_max_fill
+ * before/after is card D11-RESYNC §5.3 and is not taken here (no ufbt launch).
+ */
+#define SR_WORKER_VBUS_PERIOD_MS 250u
+/* Must stay equal to SR_IO_VBUS_PRESENT_V in sr_io.c (that symbol is file-local). */
+#define SR_WORKER_VBUS_PRESENT_V 4.5f
 
 /* Heap singletons only. Do not declare the line/parser/event types as
  * locals, VLAs, or static buffers (ADR-009 / ADR-015). */
@@ -25,6 +36,8 @@ struct SrWorker {
     size_t cmd_len;
     bool cmd_ready;
     SrWorkerStats stats;
+    uint8_t vbus_present; /* 0/1, written by the worker thread, read from any thread */
+    uint32_t vbus_last_ms;
 };
 
 static void sr_worker_sample_stack(SrWorker* w) {
@@ -70,6 +83,22 @@ static void sr_worker_handle_ready(SrWorker* w) {
     sr_line_consume(w->line);
 }
 
+static void sr_worker_sample_vbus(SrWorker* w) {
+    uint32_t now;
+    float v;
+    uint8_t present;
+
+    now = furi_get_tick();
+    if(w->vbus_last_ms != 0u &&
+       (uint32_t)(now - w->vbus_last_ms) < SR_WORKER_VBUS_PERIOD_MS) {
+        return;
+    }
+    v = furi_hal_power_get_usb_voltage();
+    present = (v >= SR_WORKER_VBUS_PRESENT_V) ? 1u : 0u;
+    __atomic_store_n(&w->vbus_present, present, __ATOMIC_RELAXED);
+    w->vbus_last_ms = now;
+}
+
 static void sr_worker_handle_bytes(SrWorker* w, const uint8_t* data, size_t n) {
     size_t off = 0;
 
@@ -95,11 +124,11 @@ static int32_t sr_worker_thread(void* context) {
 
         {
             size_t n = sr_io_read(w->io, chunk, SR_WORKER_CHUNK, SR_WORKER_RX_TIMEOUT_MS);
-            if(n == 0u) {
-                continue;
+            if(n > 0u) {
+                sr_worker_handle_bytes(w, chunk, n);
             }
-            sr_worker_handle_bytes(w, chunk, n);
         }
+        sr_worker_sample_vbus(w);
     }
 
     for(;;) {
@@ -233,4 +262,11 @@ uint32_t sr_worker_cmdack_count(const SrWorker* w, SrCmdAckClass cls) {
         return 0u;
     }
     return __atomic_load_n(&w->parser->cmdack.count[cls], __ATOMIC_RELAXED);
+}
+
+bool sr_worker_vbus_present(const SrWorker* w) {
+    if(w == NULL) {
+        return false;
+    }
+    return __atomic_load_n(&w->vbus_present, __ATOMIC_RELAXED) != 0u;
 }
