@@ -719,7 +719,7 @@ int test_gps_sample_run(void) {
     fprintf(stderr, "sizeof(SrModel)=%zu\n", sizeof(SrModel));
     fprintf(stderr, "sizeof(SrDashModel)=%zu\n", sizeof(SrDashModel));
     fprintf(stderr, "sizeof(SrGpsSampleCtx)=%zu\n", sizeof(SrGpsSampleCtx));
-    CHECK(sizeof(SrModel) == 3176);
+    CHECK(sizeof(SrModel) == 3328);
     CHECK(sizeof(SrDashModel) == 644);
     CHECK(sizeof(SrDashModel) <= 768);
     CHECK(sizeof(SrGpsSampleCtx) == 20);

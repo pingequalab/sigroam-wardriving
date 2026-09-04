@@ -28,6 +28,9 @@ typedef struct SrSourceCodec {
     /* Command to fetch one frame of GPS status (ADR-020). Codecs that do not support it leave
      * this NULL, and callers must check for NULL first. */
     size_t (*build_gps_cmd)(char* buf, size_t cap);
+    /* Command to tag a GPS POI during wardrive (card D15-POI). Codecs that do not support it leave
+     * this NULL, and callers must check for NULL first. */
+    size_t (*build_poi_cmd)(char* buf, size_t cap);
 } SrSourceCodec;
 
 /* Shared implementation of the command-buffer contract, for future codecs and host_test. Not a codec itself. */

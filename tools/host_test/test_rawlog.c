@@ -333,7 +333,7 @@ int test_rawlog_run(void) {
     fprintf(stderr, "sizeof(SrRawLog)=%zu\n", sizeof(SrRawLog));
     CHECK(sizeof(SrModel) <= 4096);
     CHECK(sizeof(SrRawLog) == 1352);
-    CHECK(sizeof(SrModel) == 3176);
+    CHECK(sizeof(SrModel) == 3328);
 
     empty = test_empty_render();
     lens = test_lens();

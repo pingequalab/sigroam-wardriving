@@ -14,6 +14,8 @@ int test_view_fmt_run(void);
 int test_gps_sample_run(void);
 int test_wait_stage_run(void);
 int test_resync_run(void);
+int test_alert_run(void);
+int test_poi_run(void);
 
 int main(void) {
     int fails = 0;
@@ -32,6 +34,8 @@ int main(void) {
     fails += test_gps_sample_run();
     fails += test_wait_stage_run();
     fails += test_resync_run();
+    fails += test_alert_run();
+    fails += test_poi_run();
 
     if(fails != 0) {
         printf("FAILED: %d assertion(s)\n", fails);

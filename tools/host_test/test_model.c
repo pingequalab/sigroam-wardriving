@@ -3,6 +3,8 @@
 #include "sr_model.h"
 #include "sr_bloom.h"
 #include "sr_types.h"
+#include "sr_line.h"
+#include "sr_parse_marauder.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,6 +126,8 @@ typedef struct {
     uint32_t last_tick_ms;
     uint32_t started_tick_ms;
     SrGpsSnapshot gps;
+    SrGpsCsvView gps_csv;
+    uint32_t gps_csv_rev;
     SrFirmwareInfo firmware;
     uint32_t firmware_rev;
     char last_unknown[SR_RAW_LINE_MAX + 1];
@@ -145,6 +149,8 @@ static void oracle_reset_stats(OracleModel* o) {
     o->unique_est = 0;
     o->illegal_trans = 0;
     o->started_tick_ms = 0;
+    memset(&o->gps_csv, 0, sizeof(o->gps_csv));
+    o->gps_csv_rev = 0;
     o->last_unknown[0] = '\0';
     o->last_unknown_len = 0;
     o->n = 0;
@@ -264,9 +270,23 @@ static bool oracle_apply(OracleModel* o, const SrEvent* ev, uint32_t tick_ms) {
         } else {
             o->ap_wifi++;
         }
-        if(o->gps.fix) {
-            b.flags = (uint8_t)(b.flags | SR_AP_FLAG_GPS);
-            o->with_gps_fix++;
+        {
+            /* Independent of apply_ap: walk the datetime payload instead of testing [0]. */
+            unsigned dt_n = 0;
+            while(rec->datetime[dt_n] != '\0' && dt_n < (unsigned)SR_DATETIME_MAX + 1u) {
+                dt_n++;
+            }
+            if(dt_n > 0u) {
+                b.flags = (uint8_t)(b.flags | SR_AP_FLAG_GPS);
+                o->with_gps_fix = o->with_gps_fix + 1u;
+            }
+            o->gps_csv.fix = (dt_n > 0u);
+            memcpy(o->gps_csv.lat, rec->lat, sizeof(o->gps_csv.lat));
+            memcpy(o->gps_csv.lon, rec->lon, sizeof(o->gps_csv.lon));
+            memcpy(o->gps_csv.alt, rec->alt, sizeof(o->gps_csv.alt));
+            memcpy(o->gps_csv.acc, rec->acc, sizeof(o->gps_csv.acc));
+            memcpy(o->gps_csv.datetime, rec->datetime, sizeof(o->gps_csv.datetime));
+            o->gps_csv_rev = o->gps_csv_rev + 1u;
         }
         if(o->bloom != NULL && sr_bloom_add(o->bloom, rec->bssid)) {
             o->unique_est++;
@@ -298,6 +318,13 @@ static void check_model_matches_oracle(const SrModel* m, const OracleModel* o) {
     CHECK(m->last_tick_ms == o->last_tick_ms);
     CHECK(m->started_tick_ms == o->started_tick_ms);
     CHECK(m->gps.fix == o->gps.fix);
+    CHECK(m->gps_csv_rev == o->gps_csv_rev);
+    CHECK(m->gps_csv.fix == o->gps_csv.fix);
+    CHECK(strcmp(m->gps_csv.lat, o->gps_csv.lat) == 0);
+    CHECK(strcmp(m->gps_csv.lon, o->gps_csv.lon) == 0);
+    CHECK(strcmp(m->gps_csv.alt, o->gps_csv.alt) == 0);
+    CHECK(strcmp(m->gps_csv.acc, o->gps_csv.acc) == 0);
+    CHECK(strcmp(m->gps_csv.datetime, o->gps_csv.datetime) == 0);
     CHECK(m->firmware_rev == o->firmware_rev);
     CHECK(m->firmware.kind == o->firmware.kind);
     CHECK(strcmp(m->firmware.firmware, o->firmware.firmware) == 0);
@@ -366,6 +393,7 @@ static void model_fresh(SrSessionState st) {
 static void test_sizeof_and_init(void) {
     fprintf(stderr, "sizeof(SrApBrief)=%zu\n", sizeof(SrApBrief));
     fprintf(stderr, "sizeof(SrModel)=%zu\n", sizeof(SrModel));
+    fprintf(stderr, "sizeof(SrGpsCsvView)=%zu\n", sizeof(SrGpsCsvView));
     fprintf(stderr, "sizeof(SrParser)=%zu\n", sizeof(SrParser));
     fprintf(stderr, "sizeof(SrFirmwareInfo)=%zu\n", sizeof(SrFirmwareInfo));
     CHECK(sizeof(SrApBrief) == 34);
@@ -390,6 +418,9 @@ static void test_sizeof_and_init(void) {
     CHECK(sr_model_recent_count(&g_model) == 0);
     CHECK(sr_model_recent(&g_model, 0) == NULL);
     CHECK(g_model.gps.fix == false);
+    CHECK(g_model.gps_csv_rev == 0);
+    CHECK(g_model.gps_csv.fix == false);
+    CHECK(g_model.gps_csv.lat[0] == '\0');
     CHECK(g_model.last_unknown[0] == '\0');
     CHECK(g_model.firmware_rev == 0);
 }
@@ -816,6 +847,8 @@ static void test_stats_gps_malformed(void) {
     CHECK(sr_model_apply(&g_model, &ev, 4) == true);
 
     ev_ap(&ev, SrEventApFound, "AA:BB:CC:DD:EE:FF", "HasFix", 11, -30);
+    sr_strlcpy(ev.u.ap.datetime, sizeof(ev.u.ap.datetime), "2026-01-01 00:00:00");
+    sr_strlcpy(ev.u.ap.lat, sizeof(ev.u.ap.lat), "31.2300000");
     CHECK(sr_model_apply(&g_model, &ev, 5) == true);
     b = sr_model_recent(&g_model, 0);
     CHECK(b != NULL);
@@ -831,6 +864,8 @@ static void test_stats_gps_malformed(void) {
     CHECK(sr_model_recent_count(&g_model) == 1);
 
     ev_ap(&ev, SrEventBleFound, "11:22:33:44:55:66", "", 0, -90);
+    sr_strlcpy(ev.u.ble.datetime, sizeof(ev.u.ble.datetime), "2026-01-01 00:00:00");
+    sr_strlcpy(ev.u.ble.lat, sizeof(ev.u.ble.lat), "31.2300000");
     CHECK(sr_model_apply(&g_model, &ev, 7) == true);
     CHECK(g_model.ap_ble == 1);
     b = sr_model_recent(&g_model, 0);
@@ -1313,8 +1348,8 @@ static void test_session_rev(void) {
     CHECK(g_model.session_rev == 1);
 
     fprintf(stderr, "sizeof(SrModel)=%zu\n", sizeof(SrModel));
-    /* After T4.6 added SrRawLog*, the 64-bit host value is 3176 (originally 3168 + 8). */
-    CHECK(sizeof(SrModel) == 3176);
+    /* After T4.6 added SrRawLog*, 3176. D12 added SrGpsCsvView + gps_csv_rev → 3328. */
+    CHECK(sizeof(SrModel) == 3328);
     CHECK(sizeof(SrModel) <= 4096);
 }
 
@@ -1431,6 +1466,275 @@ static void test_stop_reason(void) {
     CHECK(total == 9);
 }
 
+/* -------------------------------------------------------------------------- */
+/* D12 Part B: CSV-row GPS (F6/F7/F8)                                         */
+/* -------------------------------------------------------------------------- */
+
+static void test_gps_csv_rows(void) {
+    SrEvent ev;
+    const SrApBrief* b;
+    uint32_t grev;
+    uint32_t fix0;
+    uint32_t rev0;
+    SrGpsSnapshot gps_snap;
+    SrGpsCsvView csv_zero;
+
+    memset(&csv_zero, 0, sizeof(csv_zero));
+
+    /* gpsdata block must not drive FLAG_GPS / with_gps_fix (the D12 bug). */
+    model_fresh(SrSessionIdle);
+    ev_clear(&ev);
+    ev.kind = SrEventGps;
+    ev.u.gps.fix = true;
+    sr_strlcpy(ev.u.gps.lat, sizeof(ev.u.gps.lat), "1.0");
+    CHECK(sr_model_apply(&g_model, &ev, 1) == true);
+    CHECK(g_model.gps.fix == true);
+    CHECK(g_model.gps_blocks == 1);
+    CHECK(g_model.gps_csv_rev == 0);
+
+    ev_ap(&ev, SrEventApFound, "AA:BB:CC:DD:EE:00", "NoDt", 6, -40);
+    sr_strlcpy(ev.u.ap.lat, sizeof(ev.u.ap.lat), "0.0000000");
+    CHECK(sr_model_apply(&g_model, &ev, 2) == true);
+    b = sr_model_recent(&g_model, 0);
+    CHECK(b != NULL);
+    CHECK((b->flags & SR_AP_FLAG_GPS) == 0);
+    CHECK(g_model.with_gps_fix == 0);
+    CHECK(g_model.gps_csv_rev == 1);
+    CHECK(g_model.gps_csv.fix == false);
+    CHECK(strcmp(g_model.gps_csv.lat, "0.0000000") == 0);
+    CHECK(g_model.gps_blocks == 1);
+
+    /* Fresh session for the row-level cases. gps_blocks must stay 0 throughout. */
+    model_fresh(SrSessionIdle);
+    CHECK(g_model.gps_blocks == 0);
+    CHECK(g_model.gps_csv_rev == 0);
+
+    /* WiFi with fix: datetime non-empty, lat/lon non-zero. */
+    ev_ap(&ev, SrEventApFound, "AA:BB:CC:DD:EE:01", "FixYes", 6, -50);
+    sr_strlcpy(ev.u.ap.datetime, sizeof(ev.u.ap.datetime), "2026-09-03 12:00:00");
+    sr_strlcpy(ev.u.ap.lat, sizeof(ev.u.ap.lat), "31.2300000");
+    sr_strlcpy(ev.u.ap.lon, sizeof(ev.u.ap.lon), "121.4700000");
+    sr_strlcpy(ev.u.ap.alt, sizeof(ev.u.ap.alt), "12.00");
+    sr_strlcpy(ev.u.ap.acc, sizeof(ev.u.ap.acc), "3.50");
+    CHECK(sr_model_apply(&g_model, &ev, 10) == true);
+    CHECK(g_model.with_gps_fix == 1);
+    CHECK(g_model.gps_csv.fix == true);
+    CHECK(g_model.gps_csv_rev == 1);
+    CHECK(strcmp(g_model.gps_csv.lat, "31.2300000") == 0);
+    CHECK(strcmp(g_model.gps_csv.lon, "121.4700000") == 0);
+    CHECK(strcmp(g_model.gps_csv.datetime, "2026-09-03 12:00:00") == 0);
+    b = sr_model_recent(&g_model, 0);
+    CHECK(b != NULL);
+    CHECK((b->flags & SR_AP_FLAG_GPS) != 0);
+    CHECK((b->flags & SR_AP_FLAG_BLE) == 0);
+    CHECK(g_model.gps_blocks == 0);
+
+    /* WiFi without fix: empty datetime, lat/lon 0.0000000. rev still +1. */
+    fix0 = g_model.with_gps_fix;
+    rev0 = g_model.gps_csv_rev;
+    ev_ap(&ev, SrEventApFound, "AA:BB:CC:DD:EE:02", "FixNo", 11, -60);
+    ev.u.ap.datetime[0] = '\0';
+    sr_strlcpy(ev.u.ap.lat, sizeof(ev.u.ap.lat), "0.0000000");
+    sr_strlcpy(ev.u.ap.lon, sizeof(ev.u.ap.lon), "0.0000000");
+    sr_strlcpy(ev.u.ap.alt, sizeof(ev.u.ap.alt), "0.00");
+    sr_strlcpy(ev.u.ap.acc, sizeof(ev.u.ap.acc), "0.00");
+    CHECK(sr_model_apply(&g_model, &ev, 11) == true);
+    CHECK(g_model.with_gps_fix == fix0);
+    CHECK(g_model.gps_csv.fix == false);
+    CHECK(g_model.gps_csv_rev == rev0 + 1u);
+    CHECK(strcmp(g_model.gps_csv.lat, "0.0000000") == 0);
+    b = sr_model_recent(&g_model, 0);
+    CHECK(b != NULL);
+    CHECK((b->flags & SR_AP_FLAG_GPS) == 0);
+    CHECK(g_model.gps_blocks == 0);
+
+    /* BLE with fix. */
+    ev_ap(&ev, SrEventBleFound, "11:22:33:44:55:01", "BleFix", 0, -70);
+    sr_strlcpy(ev.u.ble.datetime, sizeof(ev.u.ble.datetime), "2026-09-03 12:00:01");
+    sr_strlcpy(ev.u.ble.lat, sizeof(ev.u.ble.lat), "31.2310000");
+    sr_strlcpy(ev.u.ble.lon, sizeof(ev.u.ble.lon), "121.4710000");
+    CHECK(sr_model_apply(&g_model, &ev, 12) == true);
+    CHECK(g_model.with_gps_fix == fix0 + 1u);
+    CHECK(g_model.gps_csv.fix == true);
+    CHECK(g_model.gps_csv_rev == rev0 + 2u);
+    CHECK(strcmp(g_model.gps_csv.lat, "31.2310000") == 0);
+    b = sr_model_recent(&g_model, 0);
+    CHECK(b != NULL);
+    CHECK((b->flags & SR_AP_FLAG_BLE) != 0);
+    CHECK((b->flags & SR_AP_FLAG_GPS) != 0);
+    CHECK(g_model.gps_blocks == 0);
+
+    /* BLE without fix. rev still +1, flag not set. */
+    ev_ap(&ev, SrEventBleFound, "11:22:33:44:55:02", "", 0, -80);
+    sr_strlcpy(ev.u.ble.lat, sizeof(ev.u.ble.lat), "0.0000000");
+    sr_strlcpy(ev.u.ble.lon, sizeof(ev.u.ble.lon), "0.0000000");
+    CHECK(sr_model_apply(&g_model, &ev, 13) == true);
+    CHECK(g_model.with_gps_fix == fix0 + 1u);
+    CHECK(g_model.gps_csv.fix == false);
+    CHECK(g_model.gps_csv_rev == rev0 + 3u);
+    CHECK(strcmp(g_model.gps_csv.lat, "0.0000000") == 0);
+    b = sr_model_recent(&g_model, 0);
+    CHECK(b != NULL);
+    CHECK((b->flags & SR_AP_FLAG_GPS) == 0);
+    CHECK((b->flags & SR_AP_FLAG_BLE) != 0);
+    CHECK(g_model.gps_blocks == 0);
+
+    /* reset_session clears gps_csv / gps_csv_rev; gps and gps_stop_rev stay. */
+    ev_clear(&ev);
+    ev.kind = SrEventGps;
+    ev.u.gps.fix = true;
+    sr_strlcpy(ev.u.gps.lat, sizeof(ev.u.gps.lat), "9.9");
+    CHECK(sr_model_apply(&g_model, &ev, 14) == true);
+    gps_snap = g_model.gps;
+    grev = g_model.gps_stop_rev;
+    CHECK(g_model.gps_csv_rev != 0);
+    sr_model_reset_session(&g_model, false);
+    CHECK(g_model.gps_csv_rev == 0);
+    CHECK(memcmp(&g_model.gps_csv, &csv_zero, sizeof(csv_zero)) == 0);
+    CHECK(memcmp(&g_model.gps, &gps_snap, sizeof(gps_snap)) == 0);
+    CHECK(g_model.gps_stop_rev == grev);
+}
+
+static char* gps_csv_load_fixture(const char* name, size_t expect, size_t* out_n) {
+    char path_a[256];
+    char path_b[256];
+    FILE* f = NULL;
+    long sz;
+    char* buf;
+    size_t n;
+
+    snprintf(path_a, sizeof(path_a), "fixtures/%s", name);
+    snprintf(path_b, sizeof(path_b), "tools/host_test/fixtures/%s", name);
+    f = fopen(path_a, "rb");
+    if(f == NULL) {
+        f = fopen(path_b, "rb");
+    }
+    if(f == NULL) {
+        fprintf(stderr, "fixture open failed, tried: %s ; %s\n", path_a, path_b);
+        CHECK(0);
+        *out_n = 0;
+        return NULL;
+    }
+    if(fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        CHECK(0);
+        *out_n = 0;
+        return NULL;
+    }
+    sz = ftell(f);
+    if(sz < 0) {
+        fclose(f);
+        CHECK(0);
+        *out_n = 0;
+        return NULL;
+    }
+    n = (size_t)sz;
+    CHECK(n == expect);
+    if(n != expect) {
+        fclose(f);
+        *out_n = 0;
+        return NULL;
+    }
+    rewind(f);
+    buf = (char*)malloc(n);
+    if(buf == NULL) {
+        fclose(f);
+        CHECK(0);
+        *out_n = 0;
+        return NULL;
+    }
+    if(fread(buf, 1, n, f) != n) {
+        fclose(f);
+        free(buf);
+        CHECK(0);
+        *out_n = 0;
+        return NULL;
+    }
+    fclose(f);
+    *out_n = n;
+    return buf;
+}
+
+static void test_gps_csv_fixture(void) {
+    char* raw;
+    size_t nbytes = 0;
+    size_t off = 0;
+    SrLine line;
+    SrParser parser;
+    SrEvent ev;
+    uint32_t parse_ok = 0;
+    uint32_t ap_ok = 0;
+    uint32_t ble_ok = 0;
+    uint32_t tick = 0;
+
+    raw = gps_csv_load_fixture("wardrive_no_fix.bin", 6373, &nbytes);
+    CHECK(raw != NULL);
+    if(raw == NULL) {
+        return;
+    }
+
+    sr_line_init(&line);
+    memset(&parser, 0, sizeof(parser));
+    sr_bloom_init(&g_bloom);
+    sr_model_init(&g_model, &g_bloom, NULL);
+
+    while(off < nbytes) {
+        size_t used = sr_line_feed(&line, raw + off, nbytes - off);
+        if(used == 0) {
+            if(!sr_line_ready(&line)) {
+                break;
+            }
+        } else {
+            off += used;
+        }
+        if(!sr_line_ready(&line)) {
+            continue;
+        }
+        {
+            size_t len = 0;
+            const char* text = sr_line_text(&line, &len);
+            SrParseResult r;
+
+            if(!sr_line_truncated(&line)) {
+                memset(&ev, 0, sizeof(ev));
+                r = sr_codec_marauder.feed_line(&parser, text, len, &ev);
+                if(r == SrParseOk &&
+                   (ev.kind == SrEventApFound || ev.kind == SrEventBleFound)) {
+                    parse_ok++;
+                    if(ev.kind == SrEventApFound) {
+                        ap_ok++;
+                    } else {
+                        ble_ok++;
+                    }
+                    (void)sr_model_apply(&g_model, &ev, tick++);
+                }
+            }
+            sr_line_consume(&line);
+        }
+    }
+
+    fprintf(
+        stderr,
+        "gps_csv fixture: parse_ok=%u ap=%u ble=%u gps_csv_rev=%u with_gps_fix=%u gps_blocks=%u\n",
+        parse_ok,
+        ap_ok,
+        ble_ok,
+        g_model.gps_csv_rev,
+        g_model.with_gps_fix,
+        g_model.gps_blocks);
+
+    CHECK(g_model.with_gps_fix == 0);
+    CHECK(g_model.gps_blocks == 0);
+    CHECK(g_model.gps_csv_rev == parse_ok);
+    CHECK(ap_ok + ble_ok == parse_ok);
+    /* Welded after the first print: gps_csv fixture: parse_ok=62 ap=28 ble=34 */
+    CHECK(parse_ok == 62);
+    CHECK(ap_ok == 28);
+    CHECK(ble_ok == 34);
+
+    free(raw);
+}
+
 int test_model_run(void) {
     sr_test_failures = 0;
     test_sizeof_and_init();
@@ -1445,6 +1749,8 @@ int test_model_run(void) {
     test_borrowed_view_not_stored();
     test_window_view_no_overread();
     test_stats_gps_malformed();
+    test_gps_csv_rows();
+    test_gps_csv_fixture();
     test_oracle_agreement_scripted();
     test_fuzz();
     return sr_test_failures;

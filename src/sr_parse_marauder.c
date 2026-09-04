@@ -40,6 +40,9 @@ static const char kCmdStartSerial[] = "wardrive -serial\n";
 static const char kCmdStop[] = "stopscan\n";
 /* ref: V-004 / V-060. The echo in the hardware fixture tools/host_test/fixtures/gpsdata.bin is #gpsdata. */
 static const char kCmdGps[] = "gpsdata\n";
+/* ref: V-078. Success receipt is the "POI tagged: " prefix, not an echo of this command. */
+static const char kCmdPoi[] = "wardrivepoi\n";
+static const char kPoiTagged[] = "POI tagged: ";
 /*
  * Must stay consistent with scenes/scene_probe.c:124, pinned by the first line #info of
  * fixtures/startup_info.bin. info has no builder (folding it into the codec is T7.2).
@@ -63,6 +66,10 @@ static bool line_eq(const char* line, size_t len, const char* lit, size_t lit_n)
 
 static bool line_ends(const char* line, size_t len, const char* suf, size_t suf_n) {
     return len >= suf_n && memcmp(line + (len - suf_n), suf, suf_n) == 0;
+}
+
+static bool line_starts(const char* line, size_t len, const char* pre, size_t pre_n) {
+    return len >= pre_n && memcmp(line, pre, pre_n) == 0;
 }
 
 static void copy_cap(char* dst, size_t cap, const char* src, size_t n) {
@@ -350,6 +357,10 @@ static size_t marauder_gps(char* buf, size_t cap) {
     return sr_cmd_write(buf, cap, kCmdGps);
 }
 
+static size_t marauder_poi(char* buf, size_t cap) {
+    return sr_cmd_write(buf, cap, kCmdPoi);
+}
+
 static bool probe_n(const char* line, size_t len, SrFirmwareInfo* out) {
     static const char kFw[] = "Firmware: ";
     static const char kVer[] = "Version: ";
@@ -534,6 +545,9 @@ static SrCmdAckClass cmdack_class(const char* line, size_t len) {
     if(ends_with_echo(line, len, kCmdInfo, sizeof(kCmdInfo) - 2U)) {
         return SrCmdAckInfo;
     }
+    if(line_starts(line, len, kPoiTagged, sizeof(kPoiTagged) - 1U)) {
+        return SrCmdAckPoi;
+    }
     return SrCmdAckNone;
 }
 
@@ -635,4 +649,5 @@ const SrSourceCodec sr_codec_marauder = {
     .probe_line = marauder_probe,
     .feed_line = marauder_feed,
     .build_gps_cmd = marauder_gps,
+    .build_poi_cmd = marauder_poi,
 };

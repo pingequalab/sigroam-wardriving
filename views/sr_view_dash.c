@@ -454,10 +454,11 @@ static void sr_view_dash_draw_dash(Canvas* canvas, const SrDashModel* m) {
          * Busy state: the command was never sent at all -- sr_worker_send_cmd returned false,
          * meaning the command slot still holds a previous unsent command (src/sr_worker.h:32-37).
          *
-         * Zero new fields: this reuses the existing m->scan_ui -- sr_scan_ctl_eval returns exactly
-         * SrScanUiBusy on cmd_rejected (src/sr_scan_ctl.h:48-50), and dash_fill already fills it in.
-         * Adding a new bool would grow sizeof(SrDashModel) from 644 to 648, tripping the layout
-         * tripwire at tools/host_test/test_gps_sample.c:715 (a file that must not be edited).
+         * No extra Busy-only field: this reuses the existing m->scan_ui -- sr_scan_ctl_eval returns
+         * exactly SrScanUiBusy on cmd_rejected (src/sr_scan_ctl.h:48-50), and dash_fill already
+         * fills it in. D12 added uint8_t gps_src; sizeof(SrDashModel) stayed 644 (the byte fit in
+         * existing padding). Layout sentinels at tools/host_test/test_gps_sample.c:722-724 are
+         * only to be edited when the main session authorizes each assertion by line.
          *
          * Why stating the cause outright is allowed (and does not violate ADR-022 decision 4): this
          * is a **local fact**, derived directly from our own queue state, not a conclusion about the
@@ -630,6 +631,17 @@ static void sr_view_dash_draw_stream(Canvas* canvas, const SrDashModel* m) {
     }
 }
 
+/* During an active wardrive, dash_fill stores POI phase/gate in gps_phase/gps_gate
+ * so this existing fifth-line slot can show POI copy without a new SrDashModel field
+ * (sizeof pinned at 644). Idle GPS sampling still uses sr_gps_status_text. */
+static const char* sr_view_dash_gps_hint(const SrDashModel* m, bool idle_hint) {
+    if(m->session == (uint8_t)SrSessionRunning &&
+       m->scan_ui == (uint8_t)SrScanUiRunning) {
+        return sr_poi_status_text(m->gps_phase, m->gps_gate);
+    }
+    return sr_gps_status_text(m->gps_phase, m->gps_gate, idle_hint);
+}
+
 static void sr_view_dash_draw_gps(Canvas* canvas, const SrDashModel* m) {
     char raw[64];
     char a[SR_VIEW_COLS + 1];
@@ -638,17 +650,17 @@ static void sr_view_dash_draw_gps(Canvas* canvas, const SrDashModel* m) {
     size_t slen;
     const char* s;
 
-    if(m->gps_blocks == 0) {
+    if(m->gps_src == 0) {
         if(!m->serial_open) {
             int32_t y = sr_view_dash_draw_hint(
                 canvas, 20, sigroam_io_status_hint((SrIoStatus)m->io_status));
-            s = sr_gps_status_text(m->gps_phase, m->gps_gate, true);
+            s = sr_view_dash_gps_hint(m, true);
             if(s != NULL) {
                 canvas_draw_str(canvas, 0, y, s);
             }
         } else {
             canvas_draw_str(canvas, 0, 21, "No GPS data yet");
-            s = sr_gps_status_text(m->gps_phase, m->gps_gate, true);
+            s = sr_view_dash_gps_hint(m, true);
             if(s != NULL) {
                 canvas_draw_str(canvas, 0, 31, s);
             }
@@ -656,9 +668,18 @@ static void sr_view_dash_draw_gps(Canvas* canvas, const SrDashModel* m) {
         return;
     }
 
-    slen = sr_fmt_bounded_len(m->gps.sats, sizeof(m->gps.sats));
-    n = snprintf(
-        raw, sizeof(raw), "Fix: %s  Sats: %.*s", m->gps.fix ? "Yes" : "No", (int)slen, m->gps.sats);
+    if(m->gps_src == 2) {
+        n = snprintf(raw, sizeof(raw), "Fix: %s  (live)", m->gps.fix ? "Yes" : "No");
+    } else {
+        slen = sr_fmt_bounded_len(m->gps.sats, sizeof(m->gps.sats));
+        n = snprintf(
+            raw,
+            sizeof(raw),
+            "Fix: %s  Sats: %.*s",
+            m->gps.fix ? "Yes" : "No",
+            (int)slen,
+            m->gps.sats);
+    }
     sr_view_dash_put_line(canvas, 21, raw, n, sizeof(raw));
 
     sr_fmt_gps_val(m->gps.lat, sizeof(m->gps.lat), m->gps.fix, (size_t)SR_VIEW_COLS, a, sizeof(a));
@@ -674,7 +695,7 @@ static void sr_view_dash_draw_gps(Canvas* canvas, const SrDashModel* m) {
     n = snprintf(raw, sizeof(raw), "Alt:%s Acc:%s", a, b);
     sr_view_dash_put_line(canvas, 51, raw, n, sizeof(raw));
 
-    s = sr_gps_status_text(m->gps_phase, m->gps_gate, false);
+    s = sr_view_dash_gps_hint(m, false);
     if(s != NULL) {
         canvas_draw_str(canvas, 0, 61, s);
     } else {

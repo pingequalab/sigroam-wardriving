@@ -113,6 +113,9 @@ void sr_model_reset_session(SrModel* m, bool also_reset_bloom) {
     m->illegal_trans = 0;
     m->started_tick_ms = 0;
 
+    memset(&m->gps_csv, 0, sizeof(m->gps_csv));
+    m->gps_csv_rev = 0;
+
     memset(m->recent, 0, sizeof(m->recent));
     m->recent_head = 0;
     m->recent_count = 0;
@@ -126,6 +129,7 @@ void sr_model_reset_session(SrModel* m, bool also_reset_bloom) {
      * session_rev is a cumulative transition count and reset must not clear it (ADR-017 decision 3).
      * gps_stop_rev follows the same convention and reset must not clear it (ADR-020 / ADR-017
      * decision 3).
+     * gps_csv / gps_csv_rev are session data and are cleared (D12). gps / gps_stop_rev are not.
      * bloom / rawlog contents are cleared only on explicit request; reset does not touch the ring. */
     if(also_reset_bloom && m->bloom != NULL) {
         sr_bloom_init(m->bloom);
@@ -191,10 +195,24 @@ static bool apply_ap(SrModel* m, const SrApRecord* rec, bool ble) {
     } else {
         m->ap_wifi++;
     }
-    if(m->gps.fix) {
+    if(rec->datetime[0] != '\0') {
         b.flags = (uint8_t)(b.flags | SR_AP_FLAG_GPS);
         m->with_gps_fix++;
     }
+
+    /*
+     * D12 / F6-F8: every successful wardrive row carries live GPS. Copy even without a
+     * fix so the GPS tab can show Fix: No instead of "no data". gps_blocks is not
+     * touched (V-061 probe). rec fields are NUL-terminated C strings (copy_cap), not
+     * ADR-010 borrowed views, so sr_strlcpy is safe here.
+     */
+    m->gps_csv.fix = rec->datetime[0] != '\0';
+    sr_strlcpy(m->gps_csv.lat, sizeof(m->gps_csv.lat), rec->lat);
+    sr_strlcpy(m->gps_csv.lon, sizeof(m->gps_csv.lon), rec->lon);
+    sr_strlcpy(m->gps_csv.alt, sizeof(m->gps_csv.alt), rec->alt);
+    sr_strlcpy(m->gps_csv.acc, sizeof(m->gps_csv.acc), rec->acc);
+    sr_strlcpy(m->gps_csv.datetime, sizeof(m->gps_csv.datetime), rec->datetime);
+    m->gps_csv_rev++;
 
     if(m->bloom != NULL && sr_bloom_add(m->bloom, rec->bssid)) {
         m->unique_est++;

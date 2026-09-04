@@ -9,6 +9,7 @@
 #include <gui/modules/widget.h>
 #include <gui/modules/text_box.h>
 #include <gui/modules/variable_item_list.h>
+#include <notification/notification.h>
 
 #include "scenes/sigroam_scene.h"
 #include "src/sr_settings_store.h"
@@ -19,8 +20,10 @@
 #include "src/sr_handshake.h"
 #include "src/sr_scan_ctl.h"
 #include "src/sr_gps_sample.h"
+#include "src/sr_poi.h"
 #include "src/sr_rawlog.h"
 #include "src/sr_source_codec.h"
+#include "src/sr_notify.h"
 #include "views/sr_view_dash.h"
 
 #define SR_TAG         "SigRoam"
@@ -96,6 +99,7 @@ typedef enum {
 
 typedef struct {
     Gui* gui;
+    NotificationApp* notify;
     ViewDispatcher* view_dispatcher;
     SceneManager* scene_manager;
     FuriMutex* mtx;
@@ -145,6 +149,8 @@ typedef struct {
      * GUI-thread exclusive like app->scan (see the comment block above). */
     uint32_t scan_cmdack_at_send;
     SrGpsSampleCtx gps_sample;
+    SrPoiCtx poi;
+    SrAlertCtx alert;
     bool probe_send_busy;
 } SigRoamApp;
 

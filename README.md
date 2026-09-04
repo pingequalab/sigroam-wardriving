@@ -46,7 +46,7 @@ something looks wrong.
 | **Serial pins** | 13 (TX), 14 (RX); 5 V on pin 1 |
 | **Default baud** | 115200, six choices in Settings |
 | **Unique-BSSID estimator** | 4 KB Bloom filter — 32768 bits, 4 hashes, RAM only |
-| **Firmware targets** | Official and Momentum, both built in CI |
+| **Firmware targets** | Official and Momentum — one `.fap` for both; both are built in CI |
 | **Attack features** | None, permanently — see below |
 | **Tests** | Host-side unit tests under gcc and clang, plus ASan/UBSan |
 | **License** | GPL-3.0 |
@@ -127,7 +127,9 @@ The main menu has five entries:
 - **Raw log** — the raw serial lines, including anything the parser did not
   recognise. This is the first place to look when the numbers look wrong.
 - **Settings** — Baud (six choices, default 115200), Source, Sound, Vibro,
-  Backlight, Stealth, Debug rows.
+  Backlight, Stealth, Debug rows. Sound, Vibro and the LED fire when the GPS fix
+  is acquired or lost during a survey; Stealth suppresses the LED, and Backlight
+  holds the display lit while you are on the dashboard.
 - **About** — version, compliance statement, and a QR code to this repository.
 
 While a scan is running, Back returns to the main menu **without stopping the
@@ -168,11 +170,24 @@ make -C tools/host_test asan   # same, with ASan/UBSan
 
 ## Firmware compatibility
 
-Builds against **Official** and **Momentum** firmware from the same source; both
-are checked in CI. Unleashed builds too but is not part of the regular pipeline.
+**One `.fap` covers both supported firmwares.** A release ships a single
+`sigroam-<version>.fap`, built against the Official SDK; it runs on Official and
+on Momentum, and there is nothing to pick at download time.
+
+That works because loading is gated on the firmware API *major*, which is
+compared exactly, while the minor is not compared at all. Official `1.4.3` and
+Momentum `mntm-012` both report `Target: 7, API: 87.1`, and building this source
+against both SDKs produces .fap files that differ in five bytes: a debug-link
+checksum the loader never reads, and one byte of section size. Every code, data,
+relocation and symbol section is byte-identical.
+
+Unleashed is a different API major (88.x) and is **not** covered by releases. It
+still builds from the same source, but it is not part of the regular pipeline.
 
 The app uses only the common Flipper API — no firmware-specific headers — so it
-builds against the Official SDK, which the Flipper Apps Catalog requires.
+builds against the Official SDK, which the Flipper Apps Catalog requires. CI
+keeps building both targets on every push; that matrix is what catches a
+firmware-specific API before it can reach a release.
 
 ## FAQ
 
@@ -206,9 +221,11 @@ Pins 13/14 are shared with the firmware's serial log. Set
 `Settings → System → Log Device` to `Off`.
 
 **Which firmware does it need?**
-Official or Momentum; both are built in CI from the same source. It uses only the
-common Flipper API, so it also builds against the Official SDK required by the
-Flipper Apps Catalog.
+Official or Momentum, and the same file works on both — a release ships one
+`sigroam-<version>.fap`, not one per firmware. Both targets are built in CI from
+the same source. The app uses only the common Flipper API, so it also builds
+against the Official SDK required by the Flipper Apps Catalog. Unleashed runs a
+different API major and is not covered by releases.
 
 **Which hardware is recommended?**
 Any Marauder-compatible ESP32 board works. [Scout Lite](https://github.com/pingequalab/scout-lite)

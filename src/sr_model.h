@@ -70,6 +70,8 @@ typedef struct {
     uint32_t started_tick_ms;
 
     SrGpsSnapshot gps; /* The most recent one, stored directly (there is only ever one) */
+    SrGpsCsvView gps_csv; /* D12: live GPS copied from each wardrive CSV row; not a gpsdata block */
+    uint32_t gps_csv_rev; /* Incremented on every successful AP/BLE row; 0 = never seen */
 
     SrFirmwareInfo firmware;
     uint32_t firmware_rev; /* Incremented on each SrEventFirmware; 0 = never seen */

@@ -45,10 +45,10 @@ void sr_worker_get_stats(const SrWorker* w, SrWorkerStats* out);
  * NOTE: reads a single count[cls] and **does not return the whole SrCmdAckObs** -- relaxed
  *    field-by-field reads of rev and count[] can tear (observing an intermediate state where rev
  *    has grown but count has not). A single-field atomic read has no such problem,
- *    and this is exactly the usage described in the type comment at src/sr_types.h:236-237:
+ *    and this is exactly the usage described in the type comment at src/sr_types.h:262-264:
  *    snapshot count[cls] when sending and watch for it to change.
  * NOTE: the return value is a **wrapping counter**: consumers must compare with != and must not
- *    use > (src/sr_types.h:232; this has been stepped on three times).
+ *    use > (src/sr_types.h:258-259; this has been stepped on three times).
  *
  * w == NULL, w->parser == NULL, or cls out of range -> returns 0. Callable from any thread (read only). */
 uint32_t sr_worker_cmdack_count(const SrWorker* w, SrCmdAckClass cls);

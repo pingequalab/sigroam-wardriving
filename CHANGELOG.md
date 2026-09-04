@@ -5,6 +5,55 @@ All notable changes to SigRoam are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3] — 2026-09-04
+
+Scan control, where the GPS reading comes from, the notification switches, and
+one file to download instead of two.
+
+### Added
+
+- **The Sound, Vibro, Backlight and Stealth switches now do something.** They
+  have been in Settings since 0.1, stored and displayed but never read by
+  anything. The app now alerts you when the GPS fix changes state during a
+  survey: a rising two-note beep and a green blink when the fix is acquired, a
+  falling beep and a red blink when it is lost, and a short vibrate on either.
+  Each channel is gated on its own switch — Stealth suppresses the LED — and
+  alerts are throttled to at most one every 3 seconds, with the first one after
+  a restart always allowed through. Backlight, when on, holds the display lit
+  for as long as you are on the dashboard instead of letting it time out
+  mid-drive.
+
+### Changed
+
+- **A release now ships one `.fap` instead of one per firmware.** Built against
+  the Official SDK, the same file runs on Official and on Momentum: both report
+  API 87.1, and loading is gated on the API major, which the two share. Building
+  this source against both SDKs produced files that differ in five bytes — a
+  debug-link checksum and one byte of section size — with every code, data,
+  relocation and symbol section byte-identical. `sigroam-0.3.fap` is the whole
+  download; there is nothing to pick. Unleashed runs a different API major and is
+  still not covered.
+- **The GPS reading now comes from the survey data itself.** Until now the GPS
+  tab was filled by a separate `gpsdata` query, which the scanner answers only
+  when it is not scanning — so the one moment you actually want a position was
+  the one moment the reading went stale. Each scan row already carries its own
+  latitude, longitude and timestamp, and the tab now reads those, marked
+  `(live)` to distinguish them from a sampled reading. Sampling still works on
+  the GPS tab while no scan is running.
+
+### Fixed
+
+- **Pressing OK during a scan start or stop no longer stacks up commands.** The
+  key was mapped from two states only. While the app was waiting for the scanner
+  to confirm a stop, or while it was busy, another press sent another command on
+  top of the one still in flight; and after a stop had failed, OK sent a start
+  rather than retrying the stop. All seven states are now mapped explicitly:
+  transitional states send nothing, and a failed stop retries the stop.
+- **A command that failed to reach the scanner no longer looked like it had been
+  sent.** The pending marker was cleared regardless of whether the write
+  succeeded, so a failed send left the dashboard waiting for a reply to a
+  command that never left the Flipper.
+
 ## [0.2] — 2026-09-03
 
 Power handling. Both fixes come from one wrong assumption about where the 5 V on

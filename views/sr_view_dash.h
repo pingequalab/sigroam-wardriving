@@ -38,6 +38,7 @@ typedef struct {
     uint32_t gps_blocks;
     uint8_t gps_phase; /* SrGpsPhase */
     uint8_t gps_gate;  /* SrGpsGate */
+    uint8_t gps_src;   /* 0 = none, 1 = gpsdata block, 2 = CSV row (D12) */
     /* ---- Session tab (used by T4.4; this card only copies, does not draw) ---- */
     uint32_t unknown_lines, malformed_lines, illegal_trans, session_rev;
     SrFirmwareInfo firmware;

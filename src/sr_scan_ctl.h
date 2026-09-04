@@ -52,3 +52,26 @@ static inline SrScanUiState sr_scan_ctl_eval(const SrScanCtlCtx* c, uint32_t now
     }
     return (c->session_now == SrSessionRunning) ? SrScanUiRunning : SrScanUiIdle;
 }
+
+typedef enum {
+    SrScanActNone = 0, /* Do not queue a command */
+    SrScanActSendStart, /* Queue wardrive */
+    SrScanActSendStop, /* Queue stopscan */
+} SrScanAct;
+
+/* Dash OK-key mapping (D12 A1). Pure function so host_test can cover it. */
+static inline SrScanAct sr_scan_ctl_on_ok(SrScanUiState st) {
+    switch(st) {
+    case SrScanUiRunning:
+    case SrScanUiStarting:
+    case SrScanUiStopFailed:
+        return SrScanActSendStop;
+    case SrScanUiIdle:
+    case SrScanUiStartFailed:
+        return SrScanActSendStart;
+    case SrScanUiStopping:
+    case SrScanUiBusy:
+        return SrScanActNone;
+    }
+    return SrScanActNone;
+}

@@ -44,7 +44,8 @@ static bool sigroam_resync_queue(SigRoamApp* app, bool is_start) {
         app->scan.cmd_rejected = false;
         return true;
     }
-    app->scan.cmd_pending = false;
+    /* Slot occupied (or send otherwise failed): keep cmd_pending so the
+     * in-flight command's ack criterion is not erased (D12 A3 = A2). */
     app->scan.cmd_rejected = true;
     return false;
 }
@@ -291,6 +292,9 @@ static SigRoamApp* sigroam_app_alloc(void) {
     furi_check(app->mtx);
 
     app->gui = furi_record_open(RECORD_GUI);
+    app->notify = furi_record_open(RECORD_NOTIFICATION);
+    sr_alert_reset(&app->alert);
+    sr_poi_reset(&app->poi);
 
     app->view_dispatcher = view_dispatcher_alloc();
     app->scene_manager = scene_manager_alloc(&sigroam_scene_handlers, app);
@@ -462,6 +466,7 @@ static void sigroam_app_free(SigRoamApp* app) {
     scene_manager_free(app->scene_manager);
 
     furi_mutex_free(app->mtx);
+    furi_record_close(RECORD_NOTIFICATION);
     furi_record_close(RECORD_GUI);
     free(app);
 }

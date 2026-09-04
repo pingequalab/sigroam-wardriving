@@ -184,6 +184,22 @@ typedef struct {
 } SrGpsSnapshot;
 
 /*
+ * CSV-derived live GPS (D12): every wardrive row carries the GPS state of that instant
+ * (F6/F7). Deliberately NOT SrGpsSnapshot -- the CSV row has no Sats/Text, and mixing the
+ * two sources into one struct makes "where did this number come from" unanswerable, which
+ * is exactly how the V-061 (1) gps_blocks probe would get destroyed.
+ * fix is DERIVED, not transmitted: F8 pins datetime non-empty <=> nmea.isValid().
+ */
+typedef struct {
+    bool fix;                            /* derived: datetime[0] != '\0' (F8) */
+    char lat[SR_COORD_MAX + 1];
+    char lon[SR_COORD_MAX + 1];
+    char alt[SR_COORD_MAX + 1];
+    char acc[SR_COORD_MAX + 1];
+    char datetime[SR_DATETIME_MAX + 1];
+} SrGpsCsvView;
+
+/*
  * A **borrowed view** of an unknown / malformed row, not a copy (ADR-010, delivering ADR-009 decision 4).
  *
  * text points into the sr_line assembly buffer and its **lifetime is limited to the
@@ -253,6 +269,7 @@ typedef enum {
     SrCmdAckStop,     /* stopscan */
     SrCmdAckGps,      /* gpsdata */
     SrCmdAckInfo,     /* info */
+    SrCmdAckPoi,      /* wardrivepoi */
     SrCmdAckClassCount
 } SrCmdAckClass;
 
