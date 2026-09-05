@@ -108,7 +108,7 @@ static void sigroam_resync_paint_hint(SigRoamApp* app) {
 const char* sigroam_log_device_name(FuriHalRtcLogDevice d) {
     switch(d) {
     case FuriHalRtcLogDeviceUsart:
-        return "Usart(pin13/14) <-- CONFLICTS WITH SCOUT LITE";
+        return "Usart(pin13/14) <-- CONFLICTS WITH SCANNER";
     case FuriHalRtcLogDeviceLpuart:
         return "Lpuart(pin15/16)";
     case FuriHalRtcLogDeviceReserved:

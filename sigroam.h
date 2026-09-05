@@ -27,7 +27,7 @@
 #include "views/sr_view_dash.h"
 
 #define SR_TAG         "SigRoam"
-#define SR_FAP_VERSION "0.1"
+#define SR_FAP_VERSION "0.3"
 
 /*
  * Brand / referral slot (About page).

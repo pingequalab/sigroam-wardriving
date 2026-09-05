@@ -316,7 +316,7 @@ static void sr_view_dash_draw_dash(Canvas* canvas, const SrDashModel* m) {
             return;
         }
         if(m->wait_stage == (uint8_t)SrWaitStageLink) {
-            n = snprintf(raw, sizeof(raw), "for Scout data");
+            n = snprintf(raw, sizeof(raw), "for board data");
         } else if(m->wait_stage == (uint8_t)SrWaitStageCmd) {
             n = snprintf(raw, sizeof(raw), "for cmd accepted");
         } else if(m->wait_stage == (uint8_t)SrWaitStageFunc && m->cmd_is_start) {
@@ -524,9 +524,9 @@ static void sr_view_dash_draw_dash(Canvas* canvas, const SrDashModel* m) {
         return;
     }
     if(m->rx_bytes == 0u) {
-        n = snprintf(raw, sizeof(raw), "Scout: no data");
+        n = snprintf(raw, sizeof(raw), "Board: no data");
     } else {
-        n = snprintf(raw, sizeof(raw), "Scout: data ok");
+        n = snprintf(raw, sizeof(raw), "Board: data ok");
     }
     sr_view_dash_put_line(canvas, y, raw, n, sizeof(raw));
     y += 10;

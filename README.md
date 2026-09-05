@@ -69,21 +69,25 @@ the wrong project.
 ## Hardware you need
 
 - A Flipper Zero.
-- An ESP32-based scanner running [ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder)
-  firmware, connected to the GPIO header. GPS is optional, but wardriving without
-  it only gives you counts, not locations.
+- An ESP32 Marauder board with **GPS + microSD**, connected to the GPIO header.
+  Dual-band (2.4 + 5 GHz) needs **ESP32-C5**. Without GPS you get live counts,
+  not locations; without SD there is no WiGLE CSV.
 
-Any Marauder-compatible board should work — the app talks the Marauder serial
-protocol, not a specific product.
+The app talks the Marauder serial protocol, not a specific product.
 
-> ### Built for Scout Lite
+On-device development and verification used
+**[Scout Lite](https://github.com/pingequalab/scout-lite)**
+(ESP32-C5 + Quectel L86-M33 GPS + microSD, pre-flashed Marauder).
+Other C5 + GPS + SD Marauder boards that present the same UART on Flipper
+pins 13/14 should work; they have not been bench-tested.
+
+> ### Reference board — Scout Lite
 >
-> SigRoam is developed against **[Scout Lite](https://github.com/pingequalab/scout-lite)**
-> — ESP32-C5, L86-M33 GPS, microSD — which is what the pin notes below assume.
-> It is the reference board for this app: same serial protocol, same power
-> budget, same GPS behaviour, no adapter wiring to figure out.
+> Same protocol, same 5V-on-pin-1 budget, GPS already wired, no adapter pin
+> map to guess. The pin notes below assume this board.
 >
-> **[→ Scout Lite hardware and build files](https://github.com/pingequalab/scout-lite)**
+> **[Hardware and build files](https://github.com/pingequalab/scout-lite)**
+> · **[pingequa.com](https://www.pingequa.com/products/scout-lite)**
 
 ## Wiring and required setup
 
@@ -228,8 +232,10 @@ against the Official SDK required by the Flipper Apps Catalog. Unleashed runs a
 different API major and is not covered by releases.
 
 **Which hardware is recommended?**
-Any Marauder-compatible ESP32 board works. [Scout Lite](https://github.com/pingequalab/scout-lite)
-is the reference board this app is developed against.
+An ESP32-C5 Marauder board with GPS and microSD. Development and on-device
+verification used [Scout Lite](https://github.com/pingequalab/scout-lite).
+Other Marauder-compatible boards that expose the same UART, GPS and SD
+should work; they have not been bench-tested here.
 
 ## License
 

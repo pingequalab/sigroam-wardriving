@@ -120,7 +120,7 @@ static void sigroam_scene_about_fill_conflict(SigRoamApp* app) {
         "\n"
         "Works with ESP32\n"
         "Marauder scanners\n"
-        "such as Scout Lite.\n"
+        "with GPS and SD.\n"
         "\n" SR_BRAND_URL "\n",
         SR_FAP_VERSION);
 }

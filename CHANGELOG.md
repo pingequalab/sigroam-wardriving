@@ -26,13 +26,13 @@ one file to download instead of two.
 ### Changed
 
 - **A release now ships one `.fap` instead of one per firmware.** Built against
-  the Official SDK, the same file runs on Official and on Momentum: both report
-  API 87.1, and loading is gated on the API major, which the two share. Building
-  this source against both SDKs produced files that differ in five bytes — a
+  the Official SDK. Loading is gated on the API major. This build targets API 87
+  (Official firmware 1.4.3). CFW images that report the same API major can load
+  the same file; images on a different API major are not covered. Building this
+  source against both SDKs produced files that differ in five bytes — a
   debug-link checksum and one byte of section size — with every code, data,
   relocation and symbol section byte-identical. `sigroam-0.3.fap` is the whole
-  download; there is nothing to pick. Unleashed runs a different API major and is
-  still not covered.
+  download; there is nothing to pick.
 - **The GPS reading now comes from the survey data itself.** Until now the GPS
   tab was filled by a separate `gpsdata` query, which the scanner answers only
   when it is not scanning — so the one moment you actually want a position was
@@ -125,5 +125,4 @@ external ESP32 Marauder scanner over the GPIO serial port.
   karma, beacon/BLE spam, or password cracking — permanently out of scope.
 - Survey data is not written to the Flipper's SD card. Logging is the scanner's
   job; the Flipper provides control and live visibility.
-- Builds against Official and Momentum firmware from the same source using only
-  the common Flipper API.
+- Built against the official SDK (API 87) using only the common Flipper API.
