@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Official 1.5.1 (API 88.2) does not load the v0.6.1 file. That file is an API 87 build and still loads on Official 1.4.3 and Momentum `mntm-012` (API 87.1). Unleashed `unlshd-094` is API 88.19. The loader compares the API major. This source still builds for each of those release SDKs.
+- The next release ships two files and does not ship a separate Unleashed file. `sigroam-<version>-official-api88.fap` is the Official release SDK build for Official 1.5.1 and Unleashed `unlshd-094` (API major 88). `sigroam-<version>-momentum-api87.fap` is the Momentum release SDK build for Momentum `mntm-012` and Official 1.4.3 (API major 87). The loader compares the API major. The file already published as `sigroam-0.6.1.fap` is the older API 87 build. `fap_version` stays 0.6.1.
 
 ## [0.6.1] — 2026-10-08
 

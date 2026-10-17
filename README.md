@@ -200,14 +200,17 @@ GPS-fix changes; Stealth suppresses the LED. `New net tick` is sound only.
 
 ## Compatibility and limits
 
-- **Flipper firmware:** the v0.6.1 release file `sigroam-0.6.1.fap` is an
-  Official-SDK API 87 build. It loads on Official firmware through 1.4.3
-  (API 87.1) and on Momentum `mntm-012` (API 87.1). It does not load on
-  Official 1.5.1 (API 88.2) or Unleashed `unlshd-094` (API 88.19). A build
-  from this tree against the Official release channel tracks the current
-  Official SDK; Momentum still needs its own SDK index. Check the
-  [release files and notes](https://github.com/pingequalab/sigroam-wardriving/releases/latest)
-  for your installed firmware; do not bypass an API-mismatch warning.
+- **Flipper firmware:** copy one file to `SD Card/apps/GPIO/`. The loader
+  compares the API major. Do not bypass an API-mismatch warning.
+  - `sigroam-<version>-official-api88.fap` is the Official release SDK build.
+    Install it on Official 1.5.1 and on Unleashed `unlshd-094`. Both are API
+    major 88, and there is no separate Unleashed file.
+  - `sigroam-<version>-momentum-api87.fap` is the Momentum release SDK build.
+    Install it on Momentum `mntm-012` and on Official 1.4.3. Both are API
+    major 87.
+  The file already published as `sigroam-0.6.1.fap` is the older API 87 build.
+  It is not the Official 1.5.1 file. `fap_version` is still 0.6.1 until the
+  next tag rebuilds the release with the two names above.
 - **Scanner hardware:** Scout Lite is the verified reference for the dedicated
   SigRoam scanner firmware. The FAP speaks the Marauder serial protocol and may
   work with other boards exposing it on Flipper pins 13/14, but those boards
