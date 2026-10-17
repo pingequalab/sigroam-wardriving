@@ -1,26 +1,25 @@
 # Tag-triggered release: build one .fap against the Official SDK and publish it.
 #
 # Why one artifact and not one per firmware:
-# `application.fam` declares no firmware-specific API, and the Official and
-# Momentum SDKs both produce `Target: 7, API: 87.1`. Building against both and
-# diffing the output showed the two .fap files differ in 5 bytes out of 53348:
-# the `.gnu_debuglink` CRC32, which the loader never reads, and the declared size
-# of `.fapmeta` -- 85 bytes on Official, 86 on Momentum, whose fbt appends a
-# `flags` byte. `.text`, `.rodata`, every relocation section and both symbol
-# tables are byte-identical. See V-076 in docs/VERIFY.md.
+# `application.fam` declares no firmware-specific API. The Catalog requires the
+# Official SDK build (C4). The loader compares the API major exactly; the minor
+# half of the check is commented out in Official 1.5.1, Momentum mntm-012, and
+# Unleashed unlshd-094. Measured 2026-10-17 from each release channel:
+# Official 1.5.1 is API 88.2, Unleashed unlshd-094 is API 88.19, Momentum
+# mntm-012 is API 87.1. This file loads where the major matches the Official
+# SDK it was built with. It does not load on Momentum while that release stays
+# on major 87. fap-build.yml still compiles all three; this job uploads only
+# the Official file.
 #
-# The Official build is the one that ships, and the direction matters. Momentum's
-# loader explicitly accepts an 85-byte OFW manifest and defaults the flags, while
-# the Official loader guards `.fapmeta` only from below: an 86-byte manifest out
-# of a Momentum build is not rejected, it is read past the end of an 85-byte
-# struct. Shipping the Official build is the only direction that is safe on both,
-# and it is also the build the Apps Catalog requires (C4).
-#
-# What gates loading is the API *major*, compared exactly; the minor is not
-# compared at all -- upstream has that half of the condition commented out in all
-# three firmwares (V-074). One 87.1 file therefore covers every firmware whose
-# API major is 87. Unleashed is API 88, so it stays out of this release. The
-# same ufbt action compiles it in fap-build.yml; this job does not upload that file.
+# Manifest layout is a separate gate from the API major. Official and Unleashed
+# use the OFW manifest. Momentum appends a `flags` byte and accepts a shorter
+# OFW manifest, defaulting the flags. The Official loader guards `.fapmeta`
+# only from below, then reads the section size into the struct, so a longer
+# Momentum manifest is read past the end. Shipping the Official build is the
+# safe direction. An earlier diff against Momentum, both then API 87.1, found
+# the two files differed in the debuglink CRC and that manifest byte (V-076).
+# Those API majors no longer match, so that diff is not a reason to treat one
+# file as covering both.
 #
 # fap-build.yml builds Official, Momentum, and Unleashed on every push. Official
 # and Momentum are the compile-time guard against firmware-specific APIs (C4);
@@ -201,13 +200,14 @@ jobs:
             echo ""
             echo "Receive-only Wi-Fi survey front-end driving an external ESP32 Marauder scanner."
             echo ""
-            echo "One file for both supported firmwares: \`sigroam-$VERSION.fap\` runs on"
-            echo "Official and Momentum alike -- there is nothing to pick."
+            echo "This file is built with the Official release SDK. The loader compares"
+            echo "the API major and ignores the minor, so it loads only on firmware"
+            echo "with that same major."
             echo ""
             echo "Copy it to \`SD Card/apps/GPIO/\` on the Flipper."
             echo ""
-            echo "Unleashed is not covered: its firmware API major differs (88.x against the"
-            echo "87.x this build targets), so its loader flags the app as incompatible."
+            echo "A different major needs the matching build from the fap_build matrix"
+            echo "(official, momentum, unleashed). Do not bypass an API-mismatch warning."
             echo ""
             if [ -f CHANGELOG.md ]; then
               echo "See [CHANGELOG.md](CHANGELOG.md) for the full change list."

@@ -1,6 +1,9 @@
-# T1.3c stage two: the ADR-007 Official + Momentum dual-target ufbt build.
-# Unleashed is a third row on this same action. API 88 needs its own SDK index.
-# That row does not replace Official or Momentum.
+# T1.3c stage two: the ADR-007 Official + Momentum ufbt build.
+# Unleashed is a third row on this same action. It does not replace the other two.
+# Measured 2026-10-17 from each release channel: Official 1.5.1 is API 88.2,
+# Momentum mntm-012 is API 87.1, Unleashed unlshd-094 is API 88.19. Sharing a
+# major is not a reason to drop a row. The indexes differ, and a symbol can
+# exist on only one of them.
 #
 # Why this is split from host-test.yml: the two have completely different failure modes --
 # host_test depends only on a compiler, while this one pulls SDK indexes and toolchains over the
@@ -17,10 +20,10 @@
 # build catches them.
 # This matrix moves that trap into CI where it detonates immediately.
 #
-# Why API == 87.1 is not asserted:
-# Both sides use the release channel, and channels float (today Official 1.4.3 / Momentum
-# mntm-012, both at API 87.1, see V-030 / V-048). Hard-asserting a version number would turn an
-# upstream release into a red unrelated to any commit in this repository. The only hard gate is
+# Why an API number is not asserted:
+# Every row uses that firmware's release channel, and channels float.
+# Hard-asserting a version would turn an upstream release into a red unrelated
+# to any commit in this repository. The only hard gate is
 # "every matrix target builds successfully and really produces a .fap";
 # the version numbers are recorded in the step summary and artifact names as evidence.
 
@@ -53,8 +56,9 @@ jobs:
             sdk-index-url: 'https://up.momentum-fw.dev/firmware/'
           # Same action, channel, and f7 target. Unleashed documents this index
           # for ufbt: https://up.unleashedflip.com/directory.json
-          # The bare host 404s; the file is the index. API 88, not a substitute
-          # for the Official build.
+          # The bare host 404s; the file is the index. Not a substitute for the
+          # Official build: the Catalog requires that SDK, and this row is the
+          # link check against Unleashed's own symbol table.
           - name: unleashed
             sdk-index-url: 'https://up.unleashedflip.com/directory.json'
 
