@@ -1,36 +1,31 @@
-# Tag-triggered release: build one .fap against the Official SDK and publish it.
+# Tag-triggered release: publish two .fap files from the fap_build matrix.
 #
-# Why one artifact and not one per firmware:
-# `application.fam` declares no firmware-specific API. The Catalog requires the
-# Official SDK build (C4). The loader compares the API major exactly; the minor
-# half of the check is commented out in Official 1.5.1, Momentum mntm-012, and
-# Unleashed unlshd-094. Measured 2026-10-17 from each release channel:
-# Official 1.5.1 is API 88.2, Unleashed unlshd-094 is API 88.19, Momentum
-# mntm-012 is API 87.1. This file loads where the major matches the Official
-# SDK it was built with. It does not load on Momentum while that release stays
-# on major 87. fap-build.yml still compiles all three; this job uploads only
-# the Official file.
+# fap_build.yml already compiles Official, Momentum, and Unleashed on the same
+# ufbt action. This workflow does not compile again. It takes the Official and
+# Momentum artifacts from the successful fap_build run of the tagged commit.
+# Unleashed is left there: its API major matches Official, and both use the
+# 85-byte OFW manifest, so the Official file is the one that loads on both.
 #
-# Manifest layout is a separate gate from the API major. Official and Unleashed
-# use the OFW manifest. Momentum appends a `flags` byte and accepts a shorter
-# OFW manifest, defaulting the flags. The Official loader guards `.fapmeta`
-# only from below, then reads the section size into the struct, so a longer
-# Momentum manifest is read past the end. Shipping the Official build is the
-# safe direction. An earlier diff against Momentum, both then API 87.1, found
-# the two files differed in the debuglink CRC and that manifest byte (V-076).
-# Those API majors no longer match, so that diff is not a reason to treat one
-# file as covering both.
+# Measured 2026-10-17:
+#   Official 1.5.1       API 88.2   .fapmeta 85 bytes
+#   Unleashed unlshd-094 API 88.19  .fapmeta 85 bytes
+#   Momentum mntm-012    API 87.1   .fapmeta 86 bytes (one flags byte)
+#   Official 1.4.3       API 87.1
+# The loader compares the API major and ignores the minor. The Official file
+# is for major 88 (current Official and Unleashed). The Momentum file is for
+# major 87 (current Momentum, and Official firmware that is still on 1.4.3).
+# There is no separate Unleashed asset.
 #
-# fap-build.yml builds Official, Momentum, and Unleashed on every push. Official
-# and Momentum are the compile-time guard against firmware-specific APIs (C4);
-# dropping either would let a Momentum-only symbol reach this workflow undetected.
+# The Momentum manifest is one byte longer than the OFW struct. Official's
+# loader accepts a section at least as long as the struct and then reads the
+# section length into it. major 87 is what 1.4.3 checks, and the Official
+# release channel no longer builds major 87, so the Momentum artifact is the
+# file that release ships for those devices.
 #
-# Why this is a third workflow rather than a job inside fap-build.yml:
-# fap-build runs on every push and pull request and must stay read-only
-# (`permissions: contents: read`). Publishing a release needs `contents: write`,
-# and widening the permission on the workflow that runs on every PR would hand
-# write access to any pull request build. Splitting keeps the write scope on the
-# one workflow that only ever runs from a tag on this repository.
+# Why this stays a separate workflow:
+# fap-build runs on pushes and pull requests and must stay read-only
+# (`permissions: contents: read`). Publishing needs `contents: write`.
+# Splitting keeps that write scope on the workflow that runs from a tag.
 #
 # Why `gh release create` and not a third-party release action:
 # the GitHub CLI is preinstalled on the runner image (GitHub CLI 2.98.0 on
@@ -63,8 +58,8 @@ permissions:
   contents: read
 
 jobs:
-  # Guard first, in its own job: a version mismatch should fail before an SDK
-  # download and a build have been spent on it.
+  # Guard first, in its own job: a version mismatch should fail before the
+  # matrix artifacts are downloaded.
   check:
     name: check tag vs fap_version
     runs-on: ubuntu-latest
@@ -100,58 +95,141 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag $tag matches fap_version=\"$fam\"" >> "$GITHUB_STEP_SUMMARY"
 
-  build:
-    name: build (official SDK)
+  stage:
+    name: stage official and momentum
     needs: check
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      official: ${{ steps.name.outputs.official }}
+      momentum: ${{ steps.name.outputs.momentum }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.check.outputs.tag }}
 
-      # Same pinned sha as fap-build.yml (v0.1.4). A sha rather than a floating
-      # tag: tags can be repointed, and a release build should not depend on
-      # upstream leaving a tag alone.
-      #
-      # No sdk-index-url = the official default
-      # https://update.flipperzero.one/firmware/directory.json.
-      - name: Build FAP
-        id: build
-        uses: flipperdevices/flipperzero-ufbt-action@e7cd34914e61ddc056acd8daaab96d8b4d4d9f55 # v0.1.4
-        with:
-          sdk-channel: release
-          sdk-hw-target: f7
-
-      # fbt always names the output after the appid, so rename it to the name the
-      # release advertises before it becomes an artifact.
-      - name: Stage the .fap under its release name
+      - name: Find the fap_build run for this commit
+        id: faprun
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p staged
-          fap=$(find ${{ steps.build.outputs.fap-artifacts }} -name '*.fap' -type f | head -1)
-          if [ -z "$fap" ]; then
-            echo "::error::no .fap produced"
+          sha=$(git rev-parse HEAD)
+          echo "tagged commit $sha"
+
+          # A push to main may already have finished. A tag push starts another
+          # fap_build run; wait only when nothing has succeeded yet.
+          run_id=""
+          for _ in $(seq 1 45); do
+            json=$(gh run list --workflow fap-build.yml --commit "$sha" --limit 20 \
+              --json databaseId,status,conclusion,createdAt)
+            run_id=$(printf '%s' "$json" | jq -r '[.[] | select(.conclusion=="success")] | sort_by(.createdAt) | last | .databaseId // empty')
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            pending=$(printf '%s' "$json" | jq '[.[] | select(.status=="queued" or .status=="in_progress" or .status=="waiting" or .status=="pending" or .status=="requested")] | length')
+            if [ "$pending" = "0" ]; then
+              echo "::error::no successful fap_build run for $sha"
+              printf '%s\n' "$json"
+              exit 1
+            fi
+            echo "fap_build still running for $sha"
+            sleep 30
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::timed out waiting for fap_build on $sha"
             exit 1
           fi
-          cp "$fap" "staged/sigroam-${{ needs.check.outputs.version }}.fap"
+          echo "using fap_build run $run_id"
+          echo "id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download Official artifact
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ steps.faprun.outputs.id }}
+          github-token: ${{ github.token }}
+          pattern: sigroam-official-*
+          path: incoming/official
+
+      - name: Download Momentum artifact
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ steps.faprun.outputs.id }}
+          github-token: ${{ github.token }}
+          pattern: sigroam-momentum-*
+          path: incoming/momentum
+
+      - name: Name the two release files from the manifest
+        id: name
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import struct
+          import sys
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+
+          def manifest(path):
+              data = Path(path).read_bytes()
+              if data[:4] != b"\x7fELF" or data[4] != 1:
+                  sys.exit(f"{path} is not a 32-bit ELF")
+              e_shoff = struct.unpack_from("<I", data, 32)[0]
+              e_shentsize = struct.unpack_from("<H", data, 46)[0]
+              e_shnum = struct.unpack_from("<H", data, 48)[0]
+              e_shstrndx = struct.unpack_from("<H", data, 50)[0]
+              raw = []
+              for i in range(e_shnum):
+                  off = e_shoff + i * e_shentsize
+                  name_off, _, _, _, sec_off, sec_size = struct.unpack_from("<IIIIII", data, off)
+                  raw.append((name_off, sec_off, sec_size))
+              str_off, str_size = raw[e_shstrndx][1], raw[e_shstrndx][2]
+              strtab = data[str_off:str_off + str_size]
+              for name_off, sec_off, sec_size in raw:
+                  name = strtab[name_off:strtab.find(b"\0", name_off)].decode()
+                  if name == ".fapmeta":
+                      meta = data[sec_off:sec_off + sec_size]
+                      api = struct.unpack_from("<I", meta, 8)[0]
+                      major = (api >> 16) & 0xFFFF
+                      return major, len(meta)
+              sys.exit(f"{path} has no .fapmeta")
+
+          expected = {"official": 85, "momentum": 86}
+          staged = Path("staged")
+          staged.mkdir()
+          names = {}
+          majors = {}
+          for firmware, meta_len in expected.items():
+              found = sorted(Path("incoming", firmware).rglob("*.fap"))
+              if len(found) != 1:
+                  sys.exit(f"{firmware}: expected 1 .fap, found {len(found)}")
+              major, got = manifest(found[0])
+              if got != meta_len:
+                  sys.exit(f"{firmware}: .fapmeta is {got} bytes, expected {meta_len}")
+              if major <= 0:
+                  sys.exit(f"{firmware}: API major {major}")
+              dest = staged / f"sigroam-{version}-{firmware}-api{major}.fap"
+              dest.write_bytes(found[0].read_bytes())
+              names[firmware] = dest.name
+              majors[firmware] = major
+              print(f"{firmware} {dest.name} meta={got} major={major} bytes={dest.stat().st_size}")
+          if majors["official"] == majors["momentum"]:
+              sys.exit("official and momentum API majors match")
+          if names["official"] == names["momentum"]:
+              sys.exit("official and momentum resolved to the same filename")
+          out = os.environ["GITHUB_OUTPUT"]
+          with open(out, "a", encoding="utf-8") as fh:
+              fh.write(f"official={names['official']}\n")
+              fh.write(f"momentum={names['momentum']}\n")
+          PY
           ls -l staged/
 
-      # The API major decides which firmwares can load this file (V-074), so it
-      # belongs in the run summary next to the SDK it was built against.
-      - name: Record SDK / API version
-        run: |
-          {
-            echo "### official SDK"
-            echo ""
-            echo "| Item | Value |"
-            echo "|---|---|"
-            echo "| SDK version | \`${{ fromJSON(steps.build.outputs.ufbt-status).version }}\` |"
-            echo "| API version | \`${{ steps.build.outputs.api-version }}\` |"
-            echo "| hw target | \`${{ fromJSON(steps.build.outputs.ufbt-status).target }}\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload staged FAP
+      - name: Upload staged FAPs
         uses: actions/upload-artifact@v7
         with:
           name: release
@@ -160,7 +238,7 @@ jobs:
 
   publish:
     name: publish release
-    needs: [check, build]
+    needs: [check, stage]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -169,29 +247,38 @@ jobs:
         with:
           ref: ${{ needs.check.outputs.tag }}
 
-      - name: Download built FAP
+      - name: Download staged FAPs
         uses: actions/download-artifact@v8
         with:
           name: release
           path: dist
 
-      # The artifact must exist and be non-empty. An empty upload would still
-      # publish a release, and the failure would only surface on a user's device.
-      - name: Verify the artifact is present
+      - name: Verify both files
+        env:
+          OFFICIAL: ${{ needs.stage.outputs.official }}
+          MOMENTUM: ${{ needs.stage.outputs.momentum }}
         run: |
           set -euo pipefail
           ls -l dist/
-          f="dist/sigroam-${{ needs.check.outputs.version }}.fap"
-          if [ ! -s "$f" ]; then
-            echo "::error::missing or empty artifact: $f"
+          count=$(find dist -name '*.fap' -type f | wc -l)
+          if [ "$count" != "2" ]; then
+            echo "::error::expected 2 .fap files, found $count"
             exit 1
           fi
+          for f in "dist/$OFFICIAL" "dist/$MOMENTUM"; do
+            if [ ! -s "$f" ]; then
+              echo "::error::missing or empty artifact: $f"
+              exit 1
+            fi
+          done
 
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.check.outputs.tag }}
           VERSION: ${{ needs.check.outputs.version }}
+          OFFICIAL: ${{ needs.stage.outputs.official }}
+          MOMENTUM: ${{ needs.stage.outputs.momentum }}
         run: |
           set -euo pipefail
           notes=$(mktemp)
@@ -200,14 +287,11 @@ jobs:
             echo ""
             echo "Receive-only Wi-Fi survey front-end driving an external ESP32 Marauder scanner."
             echo ""
-            echo "This file is built with the Official release SDK. The loader compares"
-            echo "the API major and ignores the minor, so it loads only on firmware"
-            echo "with that same major."
+            echo "Two files. Copy one of them to \`SD Card/apps/GPIO/\`."
+            echo "Do not bypass an API-mismatch warning."
             echo ""
-            echo "Copy it to \`SD Card/apps/GPIO/\` on the Flipper."
-            echo ""
-            echo "A different major needs the matching build from the fap_build matrix"
-            echo "(official, momentum, unleashed). Do not bypass an API-mismatch warning."
+            echo "- \`$OFFICIAL\` is the Official release SDK build. Use it on Official and Unleashed when the firmware API major matches that file. There is no separate Unleashed file."
+            echo "- \`$MOMENTUM\` is the Momentum release SDK build. Use it on Momentum, and on Official firmware that is still on that API major."
             echo ""
             if [ -f CHANGELOG.md ]; then
               echo "See [CHANGELOG.md](CHANGELOG.md) for the full change list."
@@ -215,11 +299,16 @@ jobs:
           } > "$notes"
 
           # Re-running a tag should refresh the assets rather than fail outright.
+          # The previous single name sigroam-$VERSION.fap is not one of these two.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.fap --clobber
+            old="sigroam-${VERSION}.fap"
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "$old"; then
+              gh release delete-asset "$TAG" "$old" --yes
+            fi
+            gh release upload "$TAG" "dist/$OFFICIAL" "dist/$MOMENTUM" --clobber
             gh release edit "$TAG" --notes-file "$notes"
           else
-            gh release create "$TAG" dist/*.fap \
+            gh release create "$TAG" "dist/$OFFICIAL" "dist/$MOMENTUM" \
               --title "SigRoam $VERSION" \
               --notes-file "$notes"
           fi

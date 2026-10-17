@@ -4,6 +4,8 @@
 # Momentum mntm-012 is API 87.1, Unleashed unlshd-094 is API 88.19. Sharing a
 # major is not a reason to drop a row. The indexes differ, and a symbol can
 # exist on only one of them.
+# release.yml publishes the official and momentum artifacts from a successful
+# run of this workflow. It does not publish the unleashed artifact.
 #
 # Why this is split from host-test.yml: the two have completely different failure modes --
 # host_test depends only on a compiler, while this one pulls SDK indexes and toolchains over the
@@ -32,6 +34,7 @@ name: fap_build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -56,9 +59,10 @@ jobs:
             sdk-index-url: 'https://up.momentum-fw.dev/firmware/'
           # Same action, channel, and f7 target. Unleashed documents this index
           # for ufbt: https://up.unleashedflip.com/directory.json
-          # The bare host 404s; the file is the index. Not a substitute for the
-          # Official build: the Catalog requires that SDK, and this row is the
-          # link check against Unleashed's own symbol table.
+          # The bare host 404s; the file is the index. This row is the link check
+          # against Unleashed's own symbol table. release.yml does not publish
+          # it: Official and Unleashed share the API major, and the Official
+          # .fapmeta is the 85-byte layout both loaders accept.
           - name: unleashed
             sdk-index-url: 'https://up.unleashedflip.com/directory.json'
 
@@ -92,9 +96,11 @@ jobs:
 
       # if-no-files-found: error is a deliberate guard against a no-op run:
       # without it, a run where the build step exits 0 but produces no .fap would still show green.
+      # The name starts with the matrix row so release.yml can take official and
+      # momentum and leave unleashed in this workflow.
       - name: Upload FAP
         uses: actions/upload-artifact@v7
         with:
-          name: sigroam-${{ steps.build.outputs.suffix }}
+          name: sigroam-${{ matrix.name }}-${{ steps.build.outputs.suffix }}
           path: ${{ steps.build.outputs.fap-artifacts }}
           if-no-files-found: error
