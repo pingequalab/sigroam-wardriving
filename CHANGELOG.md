@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Official 1.5.1 (API 88.2) does not load the v0.6.1 file. That file is an API 87 build and still loads on Official 1.4.3 and Momentum `mntm-012` (API 87.1). Unleashed `unlshd-094` is API 88.19. The loader compares the API major. This source still builds for each of those release SDKs.
+
 ## [0.6.1] — 2026-10-08
 
 ### Fixed
